@@ -5,7 +5,7 @@ from pathlib import Path
 
 from baegun.cli import convert_pdf_to_epub
 from baegun.config import build_convert_config
-from baegun.models import AssetIR, AssetType
+from baegun.models import AssetIR, AssetType, InferredMetadata
 
 
 def test_pipeline_smoke_uses_cache(
@@ -21,6 +21,14 @@ def test_pipeline_smoke_uses_cache(
         return sample_payload
 
     monkeypatch.setattr("baegun.cli.run_ocr", fake_run_ocr)
+    monkeypatch.setattr(
+        "baegun.cli.infer_metadata_from_ocr_payload",
+        lambda *_args, **_kwargs: InferredMetadata(
+            title="Inferred Smoke Book",
+            author="Inferred Author",
+            publisher="Inferred Publisher",
+        ),
+    )
     monkeypatch.setattr(
         "baegun.cli.extract_pdf_cover_asset",
         lambda _pdf: AssetIR(
@@ -39,7 +47,7 @@ def test_pipeline_smoke_uses_cache(
         output=tmp_path / "first.epub",
         api_key="dummy",
         model="mistral-ocr-latest",
-        title="Smoke Book",
+        title=None,
         author=None,
         language="en",
         publisher=None,
@@ -65,6 +73,9 @@ def test_pipeline_smoke_uses_cache(
         names = archive.namelist()
         assert any(name.endswith("cover.jpg") for name in names)
         assert any(name.endswith("cover.xhtml") for name in names)
+        opf = archive.read("EPUB/content.opf").decode("utf-8")
+        assert "Inferred Smoke Book" in opf
+        assert "Inferred Author" in opf
 
     monkeypatch.setattr(
         "baegun.cli.run_ocr",
@@ -76,7 +87,7 @@ def test_pipeline_smoke_uses_cache(
         output=tmp_path / "second.epub",
         api_key="dummy",
         model="mistral-ocr-latest",
-        title="Smoke Book",
+        title=None,
         author=None,
         language="en",
         publisher=None,

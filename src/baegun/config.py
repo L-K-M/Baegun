@@ -49,6 +49,13 @@ class EpubConfig(BaseModel):
     publisher: str | None = None
 
 
+class MetadataConfig(BaseModel):
+    enabled: bool = True
+    model: str = "mistral-small-latest"
+    max_pages: int = 3
+    max_chars: int = 12000
+
+
 class ConvertConfig(BaseModel):
     input_pdf: Path
     output_path: Path
@@ -64,6 +71,7 @@ class ConvertConfig(BaseModel):
     structure: StructureConfig = Field(default_factory=StructureConfig)
     render: RenderConfig
     epub: EpubConfig
+    metadata: MetadataConfig = Field(default_factory=MetadataConfig)
 
 
 def resolve_api_key(api_key: str | None) -> str:
@@ -104,12 +112,21 @@ def build_convert_config(
     fail_on_warn: bool,
     quiet: bool,
     verbose: bool,
+    infer_metadata: bool = True,
+    metadata_model: str = "mistral-small-latest",
+    metadata_max_pages: int = 3,
+    metadata_max_chars: int = 12000,
 ) -> ConvertConfig:
     if quiet and verbose:
         raise ConfigError("Use either --quiet or --verbose, not both.")
 
     if table_format not in {"html", "markdown"}:
         raise ConfigError("--table-format must be either 'html' or 'markdown'.")
+
+    if metadata_max_pages < 1:
+        raise ConfigError("--metadata-max-pages must be >= 1.")
+    if metadata_max_chars < 1000:
+        raise ConfigError("--metadata-max-chars must be >= 1000.")
 
     normalized_input = input_pdf.expanduser().resolve()
     if not normalized_input.exists() or not normalized_input.is_file():
@@ -147,6 +164,12 @@ def build_convert_config(
         language=language,
         publisher=publisher,
     )
+    metadata_cfg = MetadataConfig(
+        enabled=infer_metadata,
+        model=metadata_model,
+        max_pages=metadata_max_pages,
+        max_chars=metadata_max_chars,
+    )
 
     return ConvertConfig(
         input_pdf=normalized_input,
@@ -162,4 +185,5 @@ def build_convert_config(
         normalize=normalize_cfg,
         render=render_cfg,
         epub=epub_cfg,
+        metadata=metadata_cfg,
     )

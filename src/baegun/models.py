@@ -86,3 +86,9 @@ class ValidationResult(BaseModel):
     errors: int = 0
     warnings: int = 0
     output: str = ""
+
+
+class InferredMetadata(BaseModel):
+    title: str | None = None
+    author: str | None = None
+    publisher: str | None = None

@@ -10,8 +10,8 @@ from baegun.cache import OcrCache, compute_cache_key
 from baegun.config import ConvertConfig, build_convert_config
 from baegun.cover import extract_pdf_cover_asset
 from baegun.epub_builder import build_epub
-from baegun.mistral_client import run_ocr
-from baegun.models import AssetIR
+from baegun.mistral_client import infer_metadata_from_ocr_payload, run_ocr
+from baegun.models import AssetIR, InferredMetadata
 from baegun.normalize import normalize_ocr_payload
 from baegun.render import render_chapters
 from baegun.structure import build_structure
@@ -62,6 +62,26 @@ def convert(
         "--keep-remote-file",
         help="Do not delete the uploaded file from Mistral.",
     ),
+    infer_metadata: bool = typer.Option(
+        True,
+        "--infer-metadata/--no-infer-metadata",
+        help="Use Mistral chat to infer missing title/author/publisher.",
+    ),
+    metadata_model: str = typer.Option(
+        "mistral-small-latest",
+        "--metadata-model",
+        help="Model used for metadata inference.",
+    ),
+    metadata_max_pages: int = typer.Option(
+        3,
+        "--metadata-max-pages",
+        help="Number of OCR pages sampled for metadata inference.",
+    ),
+    metadata_max_chars: int = typer.Option(
+        12000,
+        "--metadata-max-chars",
+        help="Max characters sampled for metadata inference.",
+    ),
     fail_on_warn: bool = typer.Option(False, "--fail-on-warn", help="Treat validation warnings as failure."),
     quiet: bool = typer.Option(False, "--quiet", help="Minimal CLI output."),
     verbose: bool = typer.Option(False, "--verbose", help="Verbose CLI output."),
@@ -86,6 +106,10 @@ def convert(
             epubcheck_bin=epubcheck_bin,
             debug_dir=debug_dir,
             keep_remote_file=keep_remote_file,
+            infer_metadata=infer_metadata,
+            metadata_model=metadata_model,
+            metadata_max_pages=metadata_max_pages,
+            metadata_max_chars=metadata_max_chars,
             fail_on_warn=fail_on_warn,
             quiet=quiet,
             verbose=verbose,
@@ -129,15 +153,29 @@ def convert_pdf_to_epub(cfg: ConvertConfig) -> Path:
     if cfg.debug_dir:
         write_json(cfg.debug_dir / "ocr_payload.json", payload)
 
+    resolved_title = cfg.epub.title or cfg.input_pdf.stem
+    resolved_author = cfg.epub.author
+    resolved_publisher = cfg.epub.publisher
+
+    if cfg.metadata.enabled and (cfg.epub.title is None or cfg.epub.author is None or cfg.epub.publisher is None):
+        inferred = _infer_metadata(cfg, payload)
+        if inferred is not None:
+            if cfg.epub.title is None and inferred.title:
+                resolved_title = inferred.title
+            if cfg.epub.author is None and inferred.author:
+                resolved_author = inferred.author
+            if cfg.epub.publisher is None and inferred.publisher:
+                resolved_publisher = inferred.publisher
+
     source_hash = sha256_file(cfg.input_pdf)
     document = normalize_ocr_payload(
         payload,
         cfg.normalize,
         source_pdf_sha256=source_hash,
-        title=cfg.epub.title or cfg.input_pdf.stem,
-        author=cfg.epub.author,
+        title=resolved_title,
+        author=resolved_author,
         language=cfg.epub.language,
-        publisher=cfg.epub.publisher,
+        publisher=resolved_publisher,
     )
     document = build_structure(document, cfg.structure)
 
@@ -189,6 +227,33 @@ def _extract_cover_asset(cfg: ConvertConfig) -> AssetIR | None:
         if cfg.verbose and not cfg.quiet:
             console.print(f"[yellow]Cover skipped:[/yellow] {exc}")
         return None
+
+
+def _infer_metadata(cfg: ConvertConfig, payload: dict[str, Any]) -> InferredMetadata | None:
+    try:
+        inferred = infer_metadata_from_ocr_payload(
+            payload,
+            api_key=cfg.ocr.api_key,
+            model=cfg.metadata.model,
+            max_pages=cfg.metadata.max_pages,
+            max_chars=cfg.metadata.max_chars,
+        )
+    except Exception as exc:  # pragma: no cover - non-critical fallback path
+        if cfg.verbose and not cfg.quiet:
+            console.print(f"[yellow]Metadata inference skipped:[/yellow] {exc}")
+        return None
+
+    if inferred is not None and cfg.verbose and not cfg.quiet:
+        bits: list[str] = []
+        if inferred.title:
+            bits.append(f"title='{inferred.title}'")
+        if inferred.author:
+            bits.append(f"author='{inferred.author}'")
+        if inferred.publisher:
+            bits.append(f"publisher='{inferred.publisher}'")
+        if bits:
+            console.print(f"[cyan]Metadata:[/cyan] inferred {', '.join(bits)}")
+    return inferred
 
 
 def _document_for_debug(document: Any) -> dict[str, Any]:

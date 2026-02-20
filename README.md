@@ -38,6 +38,10 @@ Key options:
 - `--epubcheck-bin TEXT`
 - `--debug-dir PATH`
 - `--keep-remote-file`
+- `--infer-metadata/--no-infer-metadata`
+- `--metadata-model TEXT`
+- `--metadata-max-pages INT`
+- `--metadata-max-chars INT`
 - `--fail-on-warn`
 - `--quiet`
 - `--verbose`

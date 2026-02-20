@@ -18,6 +18,8 @@ def test_cli_convert_success(
     output = tmp_path / "out.epub"
 
     monkeypatch.setattr("baegun.cli.run_ocr", lambda _pdf, _cfg: sample_payload)
+    monkeypatch.setattr("baegun.cli.infer_metadata_from_ocr_payload", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("baegun.cli.extract_pdf_cover_asset", lambda _pdf: None)
 
     result = runner.invoke(
         app,
