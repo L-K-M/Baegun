@@ -49,6 +49,7 @@ Key options:
 ## Notes
 
 - PDF content is sent to the Mistral API for OCR.
+- By default, Baegun makes an additional Mistral chat call to infer missing title/author/publisher metadata (disable with `--no-infer-metadata`).
 - Cache files may contain extracted text and image data.
 - Use `--no-cache` for sensitive documents.
 - Uploaded OCR files are deleted by default unless `--keep-remote-file` is set.
