@@ -108,3 +108,46 @@ def test_pipeline_smoke_uses_cache(
 
     second_output = convert_pdf_to_epub(cfg_2)
     assert second_output.exists()
+
+
+def test_pipeline_output_name_from_metadata(monkeypatch, tmp_path: Path, sample_payload: dict) -> None:
+    input_pdf = tmp_path / "source-file.pdf"
+    input_pdf.write_bytes(
+        b"%PDF-1.4\n% baegun output naming test\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n"
+    )
+
+    monkeypatch.setattr("baegun.cli.run_ocr", lambda _pdf, _cfg: sample_payload)
+    monkeypatch.setattr(
+        "baegun.cli.infer_metadata_from_ocr_payload",
+        lambda *_args, **_kwargs: InferredMetadata(title="My Great Book", author=None, publisher=None),
+    )
+    monkeypatch.setattr("baegun.cli.extract_pdf_cover_asset", lambda _pdf: None)
+
+    cfg = build_convert_config(
+        input_pdf=input_pdf,
+        output=None,
+        api_key="dummy",
+        model="mistral-ocr-latest",
+        title=None,
+        author=None,
+        language="en",
+        publisher=None,
+        table_format="html",
+        extract_header=True,
+        extract_footer=True,
+        include_images=True,
+        cache_dir=tmp_path / "cache",
+        no_cache=True,
+        validate=False,
+        epubcheck_bin="epubcheck",
+        debug_dir=None,
+        keep_remote_file=False,
+        output_from_metadata=True,
+        fail_on_warn=False,
+        quiet=True,
+        verbose=False,
+    )
+
+    output_path = convert_pdf_to_epub(cfg)
+    assert output_path.exists()
+    assert output_path.name == "my-great-book.epub"

@@ -42,6 +42,7 @@ Key options:
 - `--metadata-model TEXT`
 - `--metadata-max-pages INT`
 - `--metadata-max-chars INT`
+- `--output-from-metadata/--no-output-from-metadata`
 - `--fail-on-warn`
 - `--quiet`
 - `--verbose`
@@ -50,6 +51,7 @@ Key options:
 
 - PDF content is sent to the Mistral API for OCR.
 - By default, Baegun makes an additional Mistral chat call to infer missing title/author/publisher metadata (disable with `--no-infer-metadata`).
+- Use `--output-from-metadata` to name the output file from inferred title (ignored when `--output` is explicitly provided).
 - Cache files may contain extracted text and image data.
 - Use `--no-cache` for sensitive documents.
 - Uploaded OCR files are deleted by default unless `--keep-remote-file` is set.

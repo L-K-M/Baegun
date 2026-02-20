@@ -25,6 +25,7 @@ from baegun.utils import (
     ValidationFailedError,
     ensure_dir,
     sha256_file,
+    slugify,
     write_json,
 )
 from baegun.validate import run_epubcheck
@@ -42,6 +43,11 @@ def main() -> None:
 def convert(
     input_pdf: Path = typer.Argument(..., help="Input PDF path."),
     output: Path | None = typer.Option(None, "-o", "--output", help="Output EPUB path."),
+    output_from_metadata: bool = typer.Option(
+        False,
+        "--output-from-metadata/--no-output-from-metadata",
+        help="Name output file from inferred book title when --output is not set.",
+    ),
     api_key: str | None = typer.Option(None, "--api-key", help="Mistral API key."),
     model: str = typer.Option("mistral-ocr-latest", "--model", help="Mistral OCR model."),
     title: str | None = typer.Option(None, "--title", help="Book title override."),
@@ -110,6 +116,7 @@ def convert(
             metadata_model=metadata_model,
             metadata_max_pages=metadata_max_pages,
             metadata_max_chars=metadata_max_chars,
+            output_from_metadata=output_from_metadata,
             fail_on_warn=fail_on_warn,
             quiet=quiet,
             verbose=verbose,
@@ -156,16 +163,20 @@ def convert_pdf_to_epub(cfg: ConvertConfig) -> Path:
     resolved_title = cfg.epub.title or cfg.input_pdf.stem
     resolved_author = cfg.epub.author
     resolved_publisher = cfg.epub.publisher
+    metadata_title = cfg.epub.title
 
     if cfg.metadata.enabled and (cfg.epub.title is None or cfg.epub.author is None or cfg.epub.publisher is None):
         inferred = _infer_metadata(cfg, payload)
         if inferred is not None:
             if cfg.epub.title is None and inferred.title:
                 resolved_title = inferred.title
+                metadata_title = inferred.title
             if cfg.epub.author is None and inferred.author:
                 resolved_author = inferred.author
             if cfg.epub.publisher is None and inferred.publisher:
                 resolved_publisher = inferred.publisher
+
+    _apply_output_name_from_metadata(cfg, metadata_title)
 
     source_hash = sha256_file(cfg.input_pdf)
     document = normalize_ocr_payload(
@@ -254,6 +265,32 @@ def _infer_metadata(cfg: ConvertConfig, payload: dict[str, Any]) -> InferredMeta
         if bits:
             console.print(f"[cyan]Metadata:[/cyan] inferred {', '.join(bits)}")
     return inferred
+
+
+def _apply_output_name_from_metadata(cfg: ConvertConfig, metadata_title: str | None) -> None:
+    if not cfg.output_from_metadata:
+        return
+    if cfg.output_was_explicit:
+        if cfg.verbose and not cfg.quiet:
+            console.print("[yellow]Output name kept:[/yellow] --output was explicitly provided")
+        return
+    if not metadata_title:
+        if cfg.verbose and not cfg.quiet:
+            console.print("[yellow]Output name kept:[/yellow] no metadata title available")
+        return
+
+    base_name = slugify(metadata_title, fallback="")
+    if not base_name:
+        if cfg.verbose and not cfg.quiet:
+            console.print("[yellow]Output name kept:[/yellow] metadata title could not be normalized")
+        return
+
+    output_path = (cfg.output_path.parent / f"{base_name}.epub").resolve()
+    cfg.output_path = output_path
+    cfg.epub.output_path = output_path
+
+    if cfg.verbose and not cfg.quiet:
+        console.print(f"[cyan]Output name:[/cyan] using metadata-derived filename {output_path.name}")
 
 
 def _document_for_debug(document: Any) -> dict[str, Any]:

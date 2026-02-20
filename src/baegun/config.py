@@ -59,6 +59,8 @@ class MetadataConfig(BaseModel):
 class ConvertConfig(BaseModel):
     input_pdf: Path
     output_path: Path
+    output_was_explicit: bool = False
+    output_from_metadata: bool = False
     quiet: bool = False
     verbose: bool = False
     run_validation: bool = False
@@ -116,6 +118,7 @@ def build_convert_config(
     metadata_model: str = "mistral-small-latest",
     metadata_max_pages: int = 3,
     metadata_max_chars: int = 12000,
+    output_from_metadata: bool = False,
 ) -> ConvertConfig:
     if quiet and verbose:
         raise ConfigError("Use either --quiet or --verbose, not both.")
@@ -174,6 +177,8 @@ def build_convert_config(
     return ConvertConfig(
         input_pdf=normalized_input,
         output_path=output_path,
+        output_was_explicit=output is not None,
+        output_from_metadata=output_from_metadata,
         quiet=quiet,
         verbose=verbose,
         run_validation=validate,
