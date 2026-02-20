@@ -8,8 +8,10 @@ from rich.console import Console
 
 from baegun.cache import OcrCache, compute_cache_key
 from baegun.config import ConvertConfig, build_convert_config
+from baegun.cover import extract_pdf_cover_asset
 from baegun.epub_builder import build_epub
 from baegun.mistral_client import run_ocr
+from baegun.models import AssetIR
 from baegun.normalize import normalize_ocr_payload
 from baegun.render import render_chapters
 from baegun.structure import build_structure
@@ -139,6 +141,10 @@ def convert_pdf_to_epub(cfg: ConvertConfig) -> Path:
     )
     document = build_structure(document, cfg.structure)
 
+    cover_asset = _extract_cover_asset(cfg)
+    if cover_asset is not None:
+        document.assets[cover_asset.asset_id] = cover_asset
+
     if cfg.debug_dir:
         write_json(cfg.debug_dir / "document_ir.json", _document_for_debug(document))
 
@@ -171,6 +177,18 @@ def _load_or_run_ocr(cfg: ConvertConfig) -> dict[str, Any]:
     payload = run_ocr(cfg.input_pdf, cfg.ocr)
     cache.save_ocr_json(key, payload)
     return payload
+
+
+def _extract_cover_asset(cfg: ConvertConfig) -> AssetIR | None:
+    try:
+        cover_asset = extract_pdf_cover_asset(cfg.input_pdf)
+        if cover_asset is not None and cfg.verbose and not cfg.quiet:
+            console.print("[cyan]Cover:[/cyan] Extracted first page as cover image")
+        return cover_asset
+    except Exception as exc:  # pragma: no cover - non-critical fallback path
+        if cfg.verbose and not cfg.quiet:
+            console.print(f"[yellow]Cover skipped:[/yellow] {exc}")
+        return None
 
 
 def _document_for_debug(document: Any) -> dict[str, Any]:

@@ -2,6 +2,8 @@
 
 Baegun is a CLI that converts local PDF files into EPUB3 books using Mistral OCR.
 
+By default, Baegun also renders page 1 of the source PDF and uses it as the EPUB cover image.
+
 ## Install
 
 ```bash

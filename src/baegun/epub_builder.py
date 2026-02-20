@@ -7,7 +7,7 @@ from pathlib import Path
 from ebooklib import epub
 
 from baegun.config import EpubConfig
-from baegun.models import AssetType, RenderedBook
+from baegun.models import AssetIR, AssetType, RenderedBook
 from baegun.utils import EpubBuildError, ensure_dir
 
 
@@ -38,6 +38,14 @@ def build_epub(rendered: RenderedBook, cfg: EpubConfig) -> Path:
         )
         book.add_item(style_item)
 
+        cover_asset = _select_cover_asset(rendered)
+        if cover_asset is not None:
+            book.set_cover(
+                f"images/{cover_asset.file_name}",
+                cover_asset.binary_content(),
+                create_page=True,
+            )
+
         chapter_items: list[epub.EpubHtml] = []
         for chapter in sorted(rendered.chapters, key=lambda item: item.order):
             chapter_item = epub.EpubHtml(
@@ -55,6 +63,8 @@ def build_epub(rendered: RenderedBook, cfg: EpubConfig) -> Path:
             chapter_items.append(chapter_item)
 
         for asset in sorted(rendered.assets.values(), key=lambda item: item.file_name):
+            if cover_asset is not None and asset.asset_id == cover_asset.asset_id:
+                continue
             if asset.type == AssetType.IMAGE:
                 item_path = f"images/{asset.file_name}"
             else:
@@ -85,3 +95,12 @@ def _extract_body_fragment(xhtml: str) -> str:
     if match:
         return match.group("body").strip()
     return xhtml
+
+
+def _select_cover_asset(rendered: RenderedBook) -> AssetIR | None:
+    asset = rendered.assets.get("cover-image")
+    if asset is None:
+        return None
+    if asset.type != AssetType.IMAGE:
+        return None
+    return asset

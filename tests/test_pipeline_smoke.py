@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import zipfile
 from pathlib import Path
 
 from baegun.cli import convert_pdf_to_epub
 from baegun.config import build_convert_config
+from baegun.models import AssetIR, AssetType
 
 
 def test_pipeline_smoke_uses_cache(
@@ -19,6 +21,18 @@ def test_pipeline_smoke_uses_cache(
         return sample_payload
 
     monkeypatch.setattr("baegun.cli.run_ocr", fake_run_ocr)
+    monkeypatch.setattr(
+        "baegun.cli.extract_pdf_cover_asset",
+        lambda _pdf: AssetIR(
+            asset_id="cover-image",
+            type=AssetType.IMAGE,
+            content=bytes.fromhex("ffd8ffe000104a464946"),
+            mime_type="image/jpeg",
+            source_page=0,
+            file_name="cover.jpg",
+            alt_text="Cover",
+        ),
+    )
 
     cfg = build_convert_config(
         input_pdf=sample_pdf_path,
@@ -47,6 +61,10 @@ def test_pipeline_smoke_uses_cache(
     first_output = convert_pdf_to_epub(cfg)
     assert first_output.exists()
     assert calls["count"] == 1
+    with zipfile.ZipFile(first_output, "r") as archive:
+        names = archive.namelist()
+        assert any(name.endswith("cover.jpg") for name in names)
+        assert any(name.endswith("cover.xhtml") for name in names)
 
     monkeypatch.setattr(
         "baegun.cli.run_ocr",

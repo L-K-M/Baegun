@@ -17,6 +17,8 @@ dependencies = [
   "beautifulsoup4>=4.12",
   "lxml>=5.2",
   "ebooklib>=0.18",
+  "pypdfium2>=4.30",
+  "pillow>=10.0",
   "tenacity>=8.5",
 ]
 
