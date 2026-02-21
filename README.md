@@ -1,6 +1,6 @@
 # Baegun
 
-Baegun is a command-line Python tool that converts PDFs into high-fidelity EPUBs that retain images, formatting, tables, and structure, using MIstral's OCR service.
+Baegun is a command-line and GUI Python tool that converts PDFs into high-fidelity EPUBs that retain images, formatting, tables, and structure, using MIstral's OCR service.
 
 By default, Baegun also renders page 1 of the source PDF, uses it as the EPUB cover image, and attempts to set metadata, such as the author and book title.
 
@@ -8,6 +8,42 @@ By default, Baegun also renders page 1 of the source PDF, uses it as the EPUB co
 
 ```bash
 pipx install -e .
+```
+
+Optional GUI dependencies:
+
+```bash
+pipx install -e ".[gui]"
+```
+
+or
+
+```bash
+brew install python-tk@3.13
+/opt/homebrew/bin/python3.12 -m tkinter
+pipx install --python /opt/homebrew/bin/python3.13 --editable '.[gui]'
+```
+
+Update:
+
+```bash
+pipx uninstall baegun
+pipx install --editable '.[gui]'
+```
+
+or: 
+
+```bash
+pipx install --force --editable '.[gui]'
+```
+
+If drag-and-drop to the file list doesn't work:
+
+```bash
+pipx uninstall baegun
+pipx install --python /opt/homebrew/bin/python3.12 --force --editable '.[gui]'
+~/.local/pipx/venvs/baegun/bin/python -m tkinter
+baegun-gui
 ```
 
 ## Quickstart
@@ -47,6 +83,20 @@ Use the helper script `bulk_convert_and_delete_comic.sh` to batch process comics
 ```bash
 ./bulk_convert_and_delete_comic.sh /input_dir /output_dir
 ```
+
+### Desktop GUI (Optional)
+
+Launch the desktop app with drag-and-drop queue support:
+
+```bash
+baegun-gui
+```
+
+GUI notes:
+
+- Drop one or many PDFs into the queue panel, then click `Convert All`.
+- Settings are saved to `~/.baegun_gui_settings.json` between sessions.
+- `Comic Mode` disables API key requirements and uses image-render mode.
 
 ## Command
 
