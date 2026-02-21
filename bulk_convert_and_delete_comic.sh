@@ -41,6 +41,54 @@ next_available_path() {
   done
 }
 
+# Lock management functions
+acquire_lock() {
+  local pdf="$1"
+  local lockdir="${pdf}.lock"
+
+  # Try to create lock directory atomically
+  if mkdir "$lockdir" 2>/dev/null; then
+    echo "$$" > "$lockdir/pid"
+    echo "$lockdir"
+    return 0
+  fi
+
+  # Lock exists - check if process is still alive
+  if [[ -f "$lockdir/pid" ]]; then
+    local pid
+    pid=$(<"$lockdir/pid")
+    if ! kill -0 "$pid" 2>/dev/null; then
+      # Stale lock - process is dead
+      echo "    Removing stale lock (PID $pid no longer exists)" >&2
+      rm -rf "$lockdir"
+      # Try again
+      if mkdir "$lockdir" 2>/dev/null; then
+        echo "$$" > "$lockdir/pid"
+        echo "$lockdir"
+        return 0
+      fi
+    fi
+  fi
+
+  return 1
+}
+
+release_lock() {
+  local lockdir="$1"
+  [[ -n "$lockdir" && -d "$lockdir" ]] && rm -rf "$lockdir"
+}
+
+# Track locks for cleanup on exit
+declare -a ACTIVE_LOCKS=()
+
+cleanup_locks() {
+  for lock in "${ACTIVE_LOCKS[@]}"; do
+    release_lock "$lock"
+  done
+}
+
+trap cleanup_locks EXIT INT TERM
+
 if [[ $# -lt 2 || $# -gt 3 ]]; then
   usage
   exit 1
@@ -74,13 +122,24 @@ fi
 
 success=0
 failed=0
+skipped=0
 
 for pdf in "${pdfs[@]}"; do
   [[ -f "$pdf" ]] || continue
   echo "==> Processing: $(basename "$pdf")"
 
+  # Try to acquire lock
+  if ! lockdir=$(acquire_lock "$pdf"); then
+    echo "    Already being processed by another instance. Skipping."
+    skipped=$((skipped + 1))
+    continue
+  fi
+  ACTIVE_LOCKS+=("$lockdir")
+
   if [[ "$DRY_RUN" == "1" ]]; then
     echo "    [DRY RUN] Would convert with metallic mode, copy EPUB to '$DEST_DIR', then delete PDF."
+    release_lock "$lockdir"
+    ACTIVE_LOCKS=("${ACTIVE_LOCKS[@]/$lockdir}")
     continue
   fi
 
@@ -94,6 +153,8 @@ for pdf in "${pdfs[@]}"; do
       --quiet; then
     echo "    Conversion failed. Keeping PDF."
     rm -f "$marker"
+    release_lock "$lockdir"
+    ACTIVE_LOCKS=("${ACTIVE_LOCKS[@]/$lockdir}")
     failed=$((failed + 1))
     continue
   fi
@@ -111,6 +172,8 @@ for pdf in "${pdfs[@]}"; do
 
   if [[ -z "$generated_epub" || ! -f "$generated_epub" ]]; then
     echo "    Could not determine generated EPUB. Keeping PDF."
+    release_lock "$lockdir"
+    ACTIVE_LOCKS=("${ACTIVE_LOCKS[@]/$lockdir}")
     failed=$((failed + 1))
     continue
   fi
@@ -128,7 +191,10 @@ for pdf in "${pdfs[@]}"; do
     echo "    Copy failed. Keeping PDF."
     failed=$((failed + 1))
   fi
+
+  release_lock "$lockdir"
+  ACTIVE_LOCKS=("${ACTIVE_LOCKS[@]/$lockdir}")
 done
 
 echo
-echo "Done. Success: $success | Failed: $failed"
+echo "Done. Success: $success | Failed: $failed | Skipped: $skipped"
