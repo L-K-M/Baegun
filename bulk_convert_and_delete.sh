@@ -153,35 +153,21 @@ for pdf in "${pdfs[@]}"; do
     continue
   fi
 
-  marker="$(mktemp "${TMPDIR:-/tmp}/baegun-marker.XXXXXX")"
-  touch "$marker"
-
-  if ! NO_COLOR=1 COLUMNS=300 "$BAEGUN_BIN" convert \
+  if ! convert_output=$(NO_COLOR=1 COLUMNS=300 "$BAEGUN_BIN" convert \
       "$pdf" \
       --api-key "$API_KEY" \
-      --output-from-metadata \
-      --quiet; then
+      --output-from-metadata 2>&1); then
     echo "    Conversion failed. Keeping PDF."
-    rm -f "$marker"
     release_lock "$lockdir"
     ACTIVE_LOCKS=("${ACTIVE_LOCKS[@]/$lockdir}")
     failed=$((failed + 1))
     continue
   fi
 
-  generated_epub=""
-  for candidate in "$INPUT_DIR"/*.epub "$INPUT_DIR"/*.EPUB; do
-    [[ -f "$candidate" ]] || continue
-    if [[ "$candidate" -nt "$marker" ]]; then
-      if [[ -z "$generated_epub" || "$candidate" -nt "$generated_epub" ]]; then
-        generated_epub="$candidate"
-      fi
-    fi
-  done
-  rm -f "$marker"
+  generated_epub=$(printf '%s\n' "$convert_output" | sed -n 's/.*Created EPUB:[[:space:]]*//p' | tail -n 1)
 
   if [[ -z "$generated_epub" || ! -f "$generated_epub" ]]; then
-    echo "    Could not determine generated EPUB. Keeping PDF."
+    echo "    Could not determine generated EPUB from baegun output. Keeping PDF."
     release_lock "$lockdir"
     ACTIVE_LOCKS=("${ACTIVE_LOCKS[@]/$lockdir}")
     failed=$((failed + 1))
