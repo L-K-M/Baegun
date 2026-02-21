@@ -6,7 +6,9 @@ By default, Baegun also renders page 1 of the source PDF, uses it as the EPUB co
 
 This file is the full implementation handoff for building the `baegun` PDF -> EPUB CLI using Mistral OCR.
 
-This is a living document. Update as appropriate when making changes to the code base.
+This is a living document. Always update it to reflect changes to code.
+
+When adding, removing, or altering features, also update user-facing documentation in README.md to reflect this.
 
 ## Goal
 
@@ -54,6 +56,12 @@ Pipeline:
 PDF -> Mistral OCR JSON -> normalization -> structure inference -> XHTML/CSS -> EPUB package -> optional epubcheck
 ```
 
+**Alternative Comic Pipeline:**
+For comic books, Baegun bypasses OCR and uses `pypdfium2` to rapidly render each PDF page straight to image chapters.
+```text
+PDF -> per-page image render (comic.py) -> XHTML/CSS -> EPUB package -> optional epubcheck
+```
+
 ## Technical Stack
 
 Python 3.11+
@@ -85,6 +93,7 @@ src/
     models.py
     mistral_client.py
     cache.py
+    comic.py
     normalize.py
     structure.py
     render.py
@@ -124,6 +133,7 @@ Options (MVP defaults):
 - `--extract-header/--no-extract-header` default `true`
 - `--extract-footer/--no-extract-footer` default `true`
 - `--include-images/--no-images` default `true`
+- `--comic/--no-comic` render PDF to images and bypass OCR (default: `false`)
 - `--cache-dir PATH` default `.baegun-cache`
 - `--no-cache` disable cache
 - `--validate` run epubcheck if present
@@ -231,6 +241,12 @@ Core objects:
 - Cache key = SHA256(input PDF bytes + model + OCR options + tool version)
 - Store raw OCR JSON and optional normalized IR snapshot
 - Provide cache hit/miss telemetry
+
+### `comic.py`
+
+- Bypasses Mistral OCR via `--comic` mode
+- Extracts pages directly as JPEG assets using `pypdfium2`
+- Builds dummy `DocumentIR` encapsulating image references as chapters
 
 ### `normalize.py`
 

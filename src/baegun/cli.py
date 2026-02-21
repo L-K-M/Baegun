@@ -58,6 +58,7 @@ def convert(
     extract_header: bool = typer.Option(True, "--extract-header/--no-extract-header"),
     extract_footer: bool = typer.Option(True, "--extract-footer/--no-extract-footer"),
     include_images: bool = typer.Option(True, "--include-images/--no-images"),
+    comic: bool = typer.Option(False, "--comic/--no-comic", help="Enable comic mode (render PDF pages as images, skips OCR)."),
     cache_dir: Path = typer.Option(Path(".baegun-cache"), "--cache-dir", help="Cache directory."),
     no_cache: bool = typer.Option(False, "--no-cache", help="Disable OCR response cache."),
     validate: bool = typer.Option(False, "--validate", help="Run epubcheck validation."),
@@ -114,9 +115,9 @@ def convert(
             keep_remote_file=keep_remote_file,
             infer_metadata=infer_metadata,
             metadata_model=metadata_model,
-            metadata_max_pages=metadata_max_pages,
             metadata_max_chars=metadata_max_chars,
             output_from_metadata=output_from_metadata,
+            comic_mode=comic,
             fail_on_warn=fail_on_warn,
             quiet=quiet,
             verbose=verbose,
@@ -156,43 +157,53 @@ def convert_pdf_to_epub(cfg: ConvertConfig) -> Path:
     if cfg.debug_dir:
         ensure_dir(cfg.debug_dir)
 
-    payload = _load_or_run_ocr(cfg)
-    if cfg.debug_dir:
-        write_json(cfg.debug_dir / "ocr_payload.json", payload)
-
+    source_hash = sha256_file(cfg.input_pdf)
     resolved_title = cfg.epub.title or cfg.input_pdf.stem
     resolved_author = cfg.epub.author
     resolved_publisher = cfg.epub.publisher
     metadata_title = cfg.epub.title
 
-    if cfg.metadata.enabled and (cfg.epub.title is None or cfg.epub.author is None or cfg.epub.publisher is None):
-        inferred = _infer_metadata(cfg, payload)
-        if inferred is not None:
-            if cfg.epub.title is None and inferred.title:
-                resolved_title = inferred.title
-                metadata_title = inferred.title
-            if cfg.epub.author is None and inferred.author:
-                resolved_author = inferred.author
-            if cfg.epub.publisher is None and inferred.publisher:
-                resolved_publisher = inferred.publisher
+    if cfg.comic_mode:
+        if cfg.verbose and not cfg.quiet:
+            console.print("[cyan]Comic Mode:[/cyan] Rendering PDF pages as images")
+        from baegun.comic import build_comic_document
+        document = build_comic_document(cfg, source_hash)
+        _apply_output_name_from_metadata(cfg, cfg.epub.title)
+        cover_asset = _extract_cover_asset(cfg)
+        if cover_asset is not None:
+            document.assets[cover_asset.asset_id] = cover_asset
+    else:
+        payload = _load_or_run_ocr(cfg)
+        if cfg.debug_dir:
+            write_json(cfg.debug_dir / "ocr_payload.json", payload)
 
-    _apply_output_name_from_metadata(cfg, metadata_title)
+        if cfg.metadata.enabled and (cfg.epub.title is None or cfg.epub.author is None or cfg.epub.publisher is None):
+            inferred = _infer_metadata(cfg, payload)
+            if inferred is not None:
+                if cfg.epub.title is None and inferred.title:
+                    resolved_title = inferred.title
+                    metadata_title = inferred.title
+                if cfg.epub.author is None and inferred.author:
+                    resolved_author = inferred.author
+                if cfg.epub.publisher is None and inferred.publisher:
+                    resolved_publisher = inferred.publisher
 
-    source_hash = sha256_file(cfg.input_pdf)
-    document = normalize_ocr_payload(
-        payload,
-        cfg.normalize,
-        source_pdf_sha256=source_hash,
-        title=resolved_title,
-        author=resolved_author,
-        language=cfg.epub.language,
-        publisher=resolved_publisher,
-    )
-    document = build_structure(document, cfg.structure)
+        _apply_output_name_from_metadata(cfg, metadata_title)
 
-    cover_asset = _extract_cover_asset(cfg)
-    if cover_asset is not None:
-        document.assets[cover_asset.asset_id] = cover_asset
+        document = normalize_ocr_payload(
+            payload,
+            cfg.normalize,
+            source_pdf_sha256=source_hash,
+            title=resolved_title,
+            author=resolved_author,
+            language=cfg.epub.language,
+            publisher=resolved_publisher,
+        )
+        document = build_structure(document, cfg.structure)
+
+        cover_asset = _extract_cover_asset(cfg)
+        if cover_asset is not None:
+            document.assets[cover_asset.asset_id] = cover_asset
 
     if cfg.debug_dir:
         write_json(cfg.debug_dir / "document_ir.json", _document_for_debug(document))

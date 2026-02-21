@@ -61,6 +61,7 @@ class ConvertConfig(BaseModel):
     output_path: Path
     output_was_explicit: bool = False
     output_from_metadata: bool = False
+    comic_mode: bool = False
     quiet: bool = False
     verbose: bool = False
     run_validation: bool = False
@@ -119,6 +120,7 @@ def build_convert_config(
     metadata_max_pages: int = 3,
     metadata_max_chars: int = 12000,
     output_from_metadata: bool = False,
+    comic_mode: bool = False,
 ) -> ConvertConfig:
     if quiet and verbose:
         raise ConfigError("Use either --quiet or --verbose, not both.")
@@ -141,7 +143,13 @@ def build_convert_config(
     cache_path = cache_dir.expanduser().resolve()
     debug_path = debug_dir.expanduser().resolve() if debug_dir else None
 
-    resolved_api_key = resolve_api_key(api_key)
+    try:
+        resolved_api_key = resolve_api_key(api_key)
+    except ConfigError as e:
+        if comic_mode:
+            resolved_api_key = "dummy"
+        else:
+            raise e
 
     ocr_cfg = OcrConfig(
         api_key=resolved_api_key,
@@ -179,6 +187,7 @@ def build_convert_config(
         output_path=output_path,
         output_was_explicit=output is not None,
         output_from_metadata=output_from_metadata,
+        comic_mode=comic_mode,
         quiet=quiet,
         verbose=verbose,
         run_validation=validate,

@@ -30,6 +30,24 @@ export MISTRAL_API_KEY="your-key"
 ./bulk_convert_and_delete.sh /input_dir /output_dir
 ```
 
+### Comic Book Conversion
+
+You can rapidly convert graphic PDFs to EPUBs without OCR using the `--comic` flag. Each page is rendered as an image.
+
+```bash
+baegun convert ./my_comic.pdf -o ./my_comic.epub --comic
+```
+
+**Bulk Comic Conversion**
+
+Use the helper script `bulk_convert_and_delete_comic.sh` to batch process comics without needing an API key.
+
+**This script will delete source PDFs.**
+
+```bash
+./bulk_convert_and_delete_comic.sh /input_dir /output_dir
+```
+
 ## Command
 
 ```bash
@@ -45,6 +63,7 @@ Key options:
 - `--extract-header/--no-extract-header`
 - `--extract-footer/--no-extract-footer`
 - `--include-images/--no-images`
+- `--comic/--no-comic`
 - `--cache-dir PATH`
 - `--no-cache`
 - `--validate`
