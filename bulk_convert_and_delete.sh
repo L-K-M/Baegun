@@ -129,8 +129,10 @@ for pdf in "${pdfs[@]}"; do
 
   if cp "$generated_epub" "$dest_epub"; then
     rm -f "$pdf"
+    rm -f "$generated_epub"
     echo "    Copied EPUB -> $dest_epub"
     echo "    Deleted PDF  -> $pdf"
+    echo "    Deleted EPUB -> $generated_epub"
     success=$((success + 1))
   else
     echo "    Copy failed. Keeping PDF."
