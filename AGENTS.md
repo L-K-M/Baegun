@@ -1,6 +1,12 @@
 # AGENTS.md
 
+Baegun is a command-line Python tool that converts PDFs into high-fidelity EPUBs that retain images, formatting, tables, and structure, using MIstral's OCR service.
+
+By default, Baegun also renders page 1 of the source PDF, uses it as the EPUB cover image, and attempts to set metadata, such as the author and book title.
+
 This file is the full implementation handoff for building the `baegun` PDF -> EPUB CLI using Mistral OCR.
+
+This is a living document. Update as appropriate when making changes to the code base.
 
 ## Goal
 

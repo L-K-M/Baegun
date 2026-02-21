@@ -1,20 +1,33 @@
 # Baegun
 
-Baegun is a CLI that converts local PDF files into EPUB3 books using Mistral OCR.
+Baegun is a command-line Python tool that converts PDFs into high-fidelity EPUBs that retain images, formatting, tables, and structure, using MIstral's OCR service.
 
-By default, Baegun also renders page 1 of the source PDF and uses it as the EPUB cover image.
+By default, Baegun also renders page 1 of the source PDF, uses it as the EPUB cover image, and attempts to set metadata, such as the author and book title.
 
 ## Install
 
 ```bash
-pip install -e .
+pipx install -e .
 ```
 
 ## Quickstart
 
+### Regular Usage
+
 ```bash
 export MISTRAL_API_KEY="your-key"
 baegun convert ./input.pdf -o ./output.epub --validate
+```
+
+### Bulk Conversion
+
+Use the helper script ```bulk_convert_and_delete.sh```.
+
+**This script will delete source PDFs**
+
+```bash
+export MISTRAL_API_KEY="your-key"
+./bulk_convert_and_delete.sh /input_dir /output_dir
 ```
 
 ## Command
