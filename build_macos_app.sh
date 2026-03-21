@@ -13,6 +13,7 @@ Options:
   -n, --name NAME        App name / bundle name (default: Baegun)
   -b, --bundle-id ID     Bundle identifier (default: com.baegun.app)
   -i, --icon PATH        Optional .icns icon path
+      --venv PATH         Build virtualenv path (default: .baegun-build-venv)
       --no-install       Skip dependency install step
       --no-clean         Skip PyInstaller --clean
   -h, --help             Show this help
@@ -30,6 +31,7 @@ PYTHON_BIN="python3"
 APP_NAME="Baegun"
 BUNDLE_ID="com.baegun.app"
 ICON_PATH=""
+BUILD_VENV_DIR=".baegun-build-venv"
 INSTALL_DEPS=1
 CLEAN_BUILD=1
 
@@ -49,6 +51,10 @@ while (( "$#" )); do
       ;;
     -i|--icon)
       ICON_PATH="${2:-}"
+      shift 2
+      ;;
+    --venv)
+      BUILD_VENV_DIR="${2:-}"
       shift 2
       ;;
     --no-install)
@@ -97,6 +103,21 @@ has_tkinter() {
   "$python_bin" - <<'PY' >/dev/null 2>&1
 import _tkinter  # noqa: F401
 import tkinter   # noqa: F401
+PY
+}
+
+is_externally_managed_python() {
+  local python_bin="$1"
+  "$python_bin" - <<'PY' >/dev/null 2>&1
+import pathlib
+import sys
+import sysconfig
+
+if sys.prefix != sys.base_prefix:
+    raise SystemExit(1)
+
+marker = pathlib.Path(sysconfig.get_path("stdlib")) / "EXTERNALLY-MANAGED"
+raise SystemExit(0 if marker.exists() else 1)
 PY
 }
 
@@ -180,19 +201,49 @@ EOF
   exit 1
 fi
 
-if [[ "$INSTALL_DEPS" == "1" ]]; then
-  echo "Installing build dependencies (editable Baegun + GUI extras + PyInstaller) ..."
-  "$PYTHON_BIN" -m pip install -e "${PROJECT_ROOT}[gui]" pyinstaller
+if [[ "$BUILD_VENV_DIR" != /* ]]; then
+  BUILD_VENV_DIR="$PROJECT_ROOT/$BUILD_VENV_DIR"
 fi
 
-if ! "$PYTHON_BIN" -m PyInstaller --version >/dev/null 2>&1; then
-  echo "Error: PyInstaller is not available for $PYTHON_BIN" >&2
-  echo "Tip: run with install step enabled, or install manually:" >&2
-  echo "  $PYTHON_BIN -m pip install pyinstaller" >&2
+BUILD_PYTHON="$PYTHON_BIN"
+EXTERNALLY_MANAGED=0
+if is_externally_managed_python "$PYTHON_BIN"; then
+  EXTERNALLY_MANAGED=1
+  if [[ -x "$BUILD_VENV_DIR/bin/python" ]]; then
+    echo "Detected externally-managed Python; reusing build virtualenv."
+    BUILD_PYTHON="$BUILD_VENV_DIR/bin/python"
+  elif [[ "$INSTALL_DEPS" == "1" ]]; then
+    echo "Detected externally-managed Python; using isolated build virtualenv."
+    if [[ ! -x "$BUILD_VENV_DIR/bin/python" ]]; then
+      "$PYTHON_BIN" -m venv "$BUILD_VENV_DIR"
+    fi
+    BUILD_PYTHON="$BUILD_VENV_DIR/bin/python"
+  fi
+fi
+
+echo "Using Python for build steps: $BUILD_PYTHON"
+
+if [[ "$INSTALL_DEPS" == "1" ]]; then
+  echo "Installing build dependencies (editable Baegun + GUI extras + PyInstaller) ..."
+  "$BUILD_PYTHON" -m pip install -e "${PROJECT_ROOT}[gui]" pyinstaller
+fi
+
+if ! "$BUILD_PYTHON" -m PyInstaller --version >/dev/null 2>&1; then
+  echo "Error: PyInstaller is not available for $BUILD_PYTHON" >&2
+  if [[ "$EXTERNALLY_MANAGED" == "1" && "$INSTALL_DEPS" == "0" ]]; then
+    cat >&2 <<EOF
+Tip: the selected Python is externally managed and --no-install is set.
+Run without --no-install so this script can create and populate:
+  $BUILD_VENV_DIR
+EOF
+  else
+    echo "Tip: run with install step enabled, or install manually:" >&2
+    echo "  $BUILD_PYTHON -m pip install pyinstaller" >&2
+  fi
   exit 1
 fi
 
-TKDND_PATH="$($PYTHON_BIN - <<'PY'
+TKDND_PATH="$($BUILD_PYTHON - <<'PY'
 import pathlib
 
 try:
@@ -234,7 +285,7 @@ if [[ -n "$TKDND_PATH" && -d "$TKDND_PATH" ]]; then
 fi
 
 echo "Building macOS app bundle ..."
-"$PYTHON_BIN" -m PyInstaller "${ARGS[@]}"
+"$BUILD_PYTHON" -m PyInstaller "${ARGS[@]}"
 
 APP_PATH="$PROJECT_ROOT/dist/${APP_NAME}.app"
 if [[ ! -d "$APP_PATH" ]]; then

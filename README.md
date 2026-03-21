@@ -91,6 +91,36 @@ GUI notes:
 - Settings are saved to `~/.baegun_gui_settings.json` between sessions.
 - `Comic Mode` disables API key requirements and uses image-render mode.
 
+### Drag-and-drop Troubleshooting (macOS)
+
+If drag-and-drop does not work in `baegun-gui`, verify all of the following:
+
+1. Install GUI extras into the same Python used to launch the GUI.
+
+```bash
+pipx install --force --python /opt/homebrew/bin/python3.12 --editable '.[gui]'
+```
+
+2. Confirm Tk and tkdnd load in that environment.
+
+```bash
+~/.local/pipx/venvs/baegun/bin/python -m tkinter
+~/.local/pipx/venvs/baegun/bin/python - <<'PY'
+from tkinterdnd2 import TkinterDnD
+root = TkinterDnD.Tk()
+print(root.tk.call("package", "require", "tkdnd"))
+root.destroy()
+PY
+```
+
+3. Ensure drag-and-drop is not disabled by env var.
+
+```bash
+unset BAEGUN_GUI_NO_DND
+```
+
+4. If using the macOS app bundle, rebuild it at least once without `--no-install` so bundled tkdnd assets are refreshed.
+
 ### Build a macOS App Bundle (Optional)
 
 You can build a clickable `.app` bundle for the GUI:
@@ -104,6 +134,7 @@ Useful options:
 ```bash
 ./build_macos_app.sh --icon ./assets/Baegun.icns --bundle-id com.example.baegun
 ./build_macos_app.sh --python /Library/Frameworks/Python.framework/Versions/3.13/bin/python3.13
+./build_macos_app.sh --venv ./.baegun-build-venv
 ```
 
 If the build script reports `tkinter` missing, run the script again with a Python interpreter that passes:
@@ -111,6 +142,8 @@ If the build script reports `tkinter` missing, run the script again with a Pytho
 ```bash
 python3 -m tkinter
 ```
+
+On Homebrew Python (PEP 668 externally-managed environments), the script now creates an isolated build virtualenv automatically and installs GUI build dependencies there.
 
 The app is created at `dist/Baegun.app`.
 

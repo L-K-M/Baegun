@@ -266,7 +266,11 @@ class BaegunApp(DnDAppBase):
         self._sync_api_key_state()
         self._refresh_drop_panel()
         if not self._dnd_enabled:
-            self._set_notice("Drag-and-drop unavailable; use click to browse.")
+            reason = (self._dnd_error or "unknown cause").strip()
+            self._set_notice(
+                f"Drag-and-drop unavailable ({reason}); use click to browse.",
+                is_error=True,
+            )
 
     def _build_ui(self) -> None:
         self.grid_columnconfigure(0, weight=0)
