@@ -2,36 +2,37 @@
   import { onMount } from 'svelte';
   import { open } from '@tauri-apps/plugin-dialog';
   import { getCurrentWindow } from '@tauri-apps/api/window';
-  import { Button, Checkbox, Dropdown, ErrorBanner, Notification, ProgressBar, TitleBar } from '@lkmc/system7-ui';
+  import {
+    Button,
+    Checkbox,
+    DownloadIcon,
+    ErrorBanner,
+    ModalDialog,
+    Notification,
+    ProgressBar,
+    TitleBar
+  } from '@lkmc/system7-ui';
 
   import type { ConversionJob, ConvertRequest } from '$lib/types';
   import { TauriService } from '$lib/tauri';
   import { notifications } from '$lib/util/notifications';
   import { WindowManager } from '$lib/windowManager';
 
-  const tableFormatOptions = [
-    { value: 'html', label: 'HTML tables' },
-    { value: 'markdown', label: 'Markdown tables' }
-  ];
-
   let jobs: ConversionJob[] = [];
   let apiKey = '';
   let outputDir = '';
-  let model = 'mistral-ocr-latest';
-  let tableFormat: 'html' | 'markdown' = 'html';
   let includeImages = true;
-  let extractHeader = true;
-  let extractFooter = true;
   let validate = false;
-  let noCache = false;
-  let keepRemoteFile = false;
+
   let converting = false;
+  let showProgressModal = false;
   let progressCurrent = 0;
   let progressTotal = 1;
   let statusMessage = 'Idle';
   let errorMessage = '';
   let windowFocused = true;
   let isWindowShaded = false;
+  let isDropActive = false;
 
   const appWindow = getCurrentWindow();
   const windowManager = new WindowManager();
@@ -45,8 +46,21 @@
     });
 
     const unlistenDrop = appWindow.onDragDropEvent((event: any) => {
-      if (event?.payload?.type === 'drop') {
-        addPaths(event.payload.paths as string[]);
+      const eventType = event?.payload?.type;
+
+      if (eventType === 'enter' || eventType === 'over') {
+        isDropActive = true;
+        return;
+      }
+
+      if (eventType === 'leave') {
+        isDropActive = false;
+        return;
+      }
+
+      if (eventType === 'drop') {
+        isDropActive = false;
+        addPaths((event.payload.paths as string[]) ?? []);
       }
     });
 
@@ -93,6 +107,7 @@
       if (existing.has(path)) {
         continue;
       }
+
       jobs = [
         ...jobs,
         {
@@ -120,7 +135,7 @@
     }
 
     if (!apiKey.trim()) {
-      errorMessage = 'Missing API key. Enter one in the API Key field.';
+      errorMessage = 'Missing API key. Enter one in the API key field.';
       return;
     }
 
@@ -131,6 +146,7 @@
     }
 
     converting = true;
+    showProgressModal = true;
     errorMessage = '';
     progressCurrent = 0;
     progressTotal = pending.length;
@@ -146,15 +162,9 @@
         input_path: job.path,
         output_path: outputPath,
         api_key: apiKey,
-        model,
         language: 'en',
-        table_format: tableFormat,
-        extract_header: extractHeader,
-        extract_footer: extractFooter,
         include_images: includeImages,
-        no_cache: noCache,
         validate,
-        keep_remote_file: keepRemoteFile,
         quiet: true,
         verbose: false
       };
@@ -184,12 +194,12 @@
       errorMessage = `${failures} conversion(s) failed.`;
       notifications.add(`${successes} succeeded, ${failures} failed.`, 'error');
     } else {
-      errorMessage = '';
       notifications.add(`Converted ${successes} file(s).`, 'success');
     }
 
     statusMessage = 'Idle';
     converting = false;
+    showProgressModal = false;
   }
 
   function updateJob(id: string, patch: Partial<ConversionJob>) {
@@ -208,11 +218,11 @@
   }
 
   function handleWindowClose() {
-    void windowManager.close();
+    windowManager.close();
   }
 
   function handleWindowDrag() {
-    void windowManager.startDragging();
+    windowManager.startDragging();
   }
 
   async function handleWindowShade() {
@@ -220,7 +230,7 @@
   }
 </script>
 
-<div class="window-frame s7-root" class:window-unfocused={!windowFocused}>
+<div class="window-frame" class:window-unfocused={!windowFocused}>
   <TitleBar
     title="Baegun"
     focused={windowFocused}
@@ -240,97 +250,108 @@
 
   {#if !isWindowShaded}
     <main class="app-content">
+      <section class="file-panel">
+        <div class="panel-header">
+          <h2>File List</h2>
+          <div class="header-actions">
+            <Button onclick={choosePdfFiles}>Add PDFs</Button>
+            <Button onclick={clearFinished} disabled={doneCount === 0}>Clear Finished</Button>
+          </div>
+        </div>
+
+        <div class="file-table">
+          <div class="table-header-container">
+            <table>
+              <thead>
+                <tr>
+                  <th class="col-file">File</th>
+                  <th class="col-status">Status</th>
+                  <th class="col-output">Output</th>
+                  <th class="col-detail">Details</th>
+                </tr>
+              </thead>
+            </table>
+          </div>
+
+          <div class="table-body-container" class:drop-active={isDropActive}>
+            <table>
+              <tbody>
+                {#if jobs.length === 0}
+                  <tr>
+                    <td colspan="4" class="empty-row">
+                      Drop PDFs into this table, or click <strong>Add PDFs</strong>.
+                    </td>
+                  </tr>
+                {:else}
+                  {#each jobs as job (job.id)}
+                    <tr>
+                      <td class="col-file">
+                        <div class="file-cell">
+                          <span class="file-icon" aria-hidden="true">📄</span>
+                          <span class="file-name">{basename(job.path)}</span>
+                        </div>
+                      </td>
+                      <td class="col-status">
+                        <span class="status status-{job.status}">{job.status}</span>
+                      </td>
+                      <td class="col-output">{job.outputPath || '-'}</td>
+                      <td class="col-detail">{job.message || '-'}</td>
+                    </tr>
+                  {/each}
+                {/if}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
       <section class="settings-panel">
         <h2>Settings</h2>
 
         <label>
-          API Key
-          <input type="password" bind:value={apiKey} placeholder="MISTRAL_API_KEY" />
+          API key
+          <input type="password" bind:value={apiKey} placeholder="mistral-xxxxxxxxxxxxxxxxxxxxxxxx" />
         </label>
 
         <label>
-          OCR Model
-          <input type="text" bind:value={model} />
-        </label>
-
-        <label>
-          Output Directory (optional)
+          Output directory (optional)
           <div class="path-row">
-            <input type="text" bind:value={outputDir} placeholder="same folder as input" />
+            <input type="text" bind:value={outputDir} placeholder="same folder as each source PDF" />
             <Button onclick={chooseOutputDirectory}>Choose</Button>
           </div>
         </label>
 
-        <div class="setting-row">
-          <span>Table Format</span>
-          <Dropdown options={tableFormatOptions} bind:value={tableFormat} />
-        </div>
-
-        <div class="check-grid">
+        <div class="check-row">
           <Checkbox
             checked={includeImages}
             label="Include images"
             onchange={(checked: boolean) => (includeImages = checked)}
           />
-          <Checkbox
-            checked={extractHeader}
-            label="Extract header"
-            onchange={(checked: boolean) => (extractHeader = checked)}
-          />
-          <Checkbox
-            checked={extractFooter}
-            label="Extract footer"
-            onchange={(checked: boolean) => (extractFooter = checked)}
-          />
           <Checkbox checked={validate} label="Run epubcheck" onchange={(checked: boolean) => (validate = checked)} />
-          <Checkbox checked={noCache} label="Disable cache" onchange={(checked: boolean) => (noCache = checked)} />
-          <Checkbox
-            checked={keepRemoteFile}
-            label="Keep remote file"
-            onchange={(checked: boolean) => (keepRemoteFile = checked)}
-          />
         </div>
 
-        <div class="actions">
-          <Button onclick={choosePdfFiles}>Add PDFs</Button>
-          <Button onclick={convertAll} disabled={converting || pendingCount === 0}>Convert All</Button>
-          <Button onclick={clearFinished} disabled={doneCount === 0}>Clear Finished</Button>
-        </div>
-
-        <div class="progress-wrap">
-          <ProgressBar value={progressCurrent} max={progressTotal} height={16} ariaLabel="Conversion progress" />
-          <span>{statusMessage}</span>
-        </div>
-      </section>
-
-      <section class="queue-panel">
-        <h2>Queue</h2>
-        <button class="drop-zone" onclick={choosePdfFiles}>
-          Drop PDFs from Finder into this window, or click to browse.
-        </button>
-
-        <div class="queue-list" role="list">
-          {#if jobs.length === 0}
-            <p class="empty">No files queued.</p>
-          {:else}
-            {#each jobs as job (job.id)}
-              <div class="queue-row" role="listitem">
-                <div class="queue-main">
-                  <span class="name">{basename(job.path)}</span>
-                  <span class="status status-{job.status}">{job.status}</span>
-                </div>
-                {#if job.outputPath}
-                  <div class="meta">{job.outputPath}</div>
-                {/if}
-                {#if job.message}
-                  <div class="meta">{job.message}</div>
-                {/if}
-              </div>
-            {/each}
-          {/if}
+        <div class="settings-footer">
+          <div class="queue-meta">Pending: {pendingCount} · Done: {doneCount}</div>
+          <Button variant="primary" onclick={convertAll} disabled={converting || pendingCount === 0}>
+            <span class="convert-button-content">
+              <DownloadIcon alt="Convert" size={14} />
+              Convert All
+            </span>
+          </Button>
         </div>
       </section>
     </main>
+  {/if}
+
+  {#if showProgressModal}
+    <ModalDialog width="440px">
+      <div class="progress-modal">
+        <h3>Converting Files</h3>
+        <p>{statusMessage}</p>
+        <ProgressBar value={progressCurrent} max={progressTotal} height={16} ariaLabel="Conversion progress" />
+        <p class="modal-meta">{progressCurrent} of {progressTotal} complete</p>
+      </div>
+    </ModalDialog>
   {/if}
 </div>
 
@@ -343,117 +364,202 @@
     box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.2);
     display: flex;
     flex-direction: column;
+    font-family: 'Geneva', 'Verdana', 'Helvetica', sans-serif;
+    font-size: 14px;
+  }
+
+  .window-frame :global(.title-text span) {
+    font-size: 18px !important;
   }
 
   .app-content {
     flex: 1;
     min-height: 0;
-    display: grid;
-    grid-template-columns: minmax(320px, 440px) minmax(420px, 1fr);
-    gap: 12px;
-    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px;
   }
 
-  .settings-panel,
-  .queue-panel {
-    border: 1px solid #000;
-    padding: 10px;
+  .file-panel,
+  .settings-panel {
+    padding: 0;
     display: flex;
     flex-direction: column;
     gap: 10px;
     min-height: 0;
   }
 
-  h2 {
+  .file-panel {
+    flex: 1;
+  }
+
+  .panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .header-actions {
+    display: flex;
+    gap: 8px;
+  }
+
+  h2,
+  h3 {
     margin: 0;
-    font-size: 18px;
+    font-size: 15px;
+    font-weight: 700;
   }
 
   label {
     display: flex;
     flex-direction: column;
     gap: 4px;
+    font-size: 13px;
   }
 
   input[type='text'],
   input[type='password'] {
     border: 1px solid #000;
     padding: 6px 8px;
-    font-family: inherit;
+    font-family: 'Geneva', 'Verdana', 'Helvetica', sans-serif;
+    font-size: 13px;
   }
 
   .path-row {
     display: grid;
-    grid-template-columns: 1fr auto;
+    grid-template-columns: minmax(220px, 1fr) auto;
     gap: 6px;
+    align-items: center;
   }
 
-  .setting-row {
+  .check-row {
     display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .check-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 6px 8px;
-  }
-
-  .actions {
-    display: flex;
-    gap: 8px;
+    gap: 16px;
     flex-wrap: wrap;
   }
 
-  .progress-wrap {
+  .settings-footer {
     display: flex;
-    flex-direction: column;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .queue-meta {
+    color: #444;
+    font-size: 12px;
+  }
+
+  .convert-button-content {
+    display: inline-flex;
+    align-items: center;
     gap: 6px;
   }
 
-  .drop-zone {
-    border: 2px dashed #000;
-    background: #f6f6f6;
-    padding: 18px 10px;
-    text-align: center;
-    cursor: pointer;
-    font-family: inherit;
-  }
-
-  .queue-list {
+  .file-table {
     flex: 1;
     min-height: 0;
-    overflow: auto;
+    display: flex;
+    flex-direction: column;
     border: 1px solid #000;
   }
 
-  .queue-row {
+  .table-header-container {
+    padding-right: 16px;
     border-bottom: 1px solid #000;
-    padding: 8px;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
+    background: #fff;
   }
 
-  .queue-main {
+  .table-body-container {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    border-top: 1px solid #000;
+    margin-top: 2px;
+    background: #fff;
+  }
+
+  .table-body-container.drop-active {
+    background: #eef4ff;
+    outline: 2px dashed #365ea8;
+    outline-offset: -3px;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-family: 'Geneva', 'Verdana', 'Helvetica', sans-serif;
+    font-size: 13px;
+  }
+
+  th,
+  td {
+    text-align: left;
+    padding: 5px 8px;
+    vertical-align: middle;
+    border-bottom: 1px solid #d9d9d9;
+  }
+
+  th {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #222;
+  }
+
+  tr:last-child td {
+    border-bottom: none;
+  }
+
+  .col-file {
+    width: 34%;
+  }
+
+  .col-status {
+    width: 12%;
+  }
+
+  .col-output {
+    width: 32%;
+  }
+
+  .col-detail {
+    width: 22%;
+  }
+
+  .file-cell {
     display: flex;
-    justify-content: space-between;
+    align-items: center;
     gap: 8px;
+    min-width: 0;
   }
 
-  .name {
-    font-weight: 600;
+  .file-icon {
+    width: 16px;
+    text-align: center;
+  }
+
+  .file-name,
+  .col-output,
+  .col-detail {
     overflow-wrap: anywhere;
   }
 
   .status {
     text-transform: uppercase;
-    font-size: 12px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
   }
 
   .status-pending {
-    color: #555;
+    color: #4f4f4f;
   }
 
   .status-running {
@@ -461,33 +567,52 @@
   }
 
   .status-done {
-    color: #1b7a3a;
+    color: #1a7a3b;
   }
 
   .status-error {
     color: #b32020;
   }
 
-  .meta {
-    font-size: 12px;
-    color: #333;
-    overflow-wrap: anywhere;
-  }
-
-  .empty {
-    margin: 0;
-    padding: 10px;
+  .empty-row {
+    padding: 18px 10px;
+    text-align: center;
     color: #666;
+    border-bottom: none;
   }
 
-  @media (max-width: 980px) {
-    .app-content {
-      grid-template-columns: 1fr;
-      overflow: auto;
+  .progress-modal {
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .progress-modal p {
+    margin: 0;
+    font-size: 13px;
+  }
+
+  .modal-meta {
+    color: #333;
+  }
+
+  @media (max-width: 900px) {
+    .settings-footer,
+    .panel-header,
+    .header-actions,
+    .check-row {
+      flex-direction: column;
+      align-items: flex-start;
     }
 
-    .check-grid {
+    .path-row {
       grid-template-columns: 1fr;
+    }
+
+    .col-status,
+    .col-detail {
+      width: 18%;
     }
   }
 </style>

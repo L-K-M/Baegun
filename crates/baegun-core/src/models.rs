@@ -139,7 +139,6 @@ pub struct RenderedChapter {
 
 #[derive(Debug, Clone)]
 pub struct ImageAsset {
-    pub id: String,
     pub file_name: String,
     pub media_type: String,
     pub bytes: Vec<u8>,

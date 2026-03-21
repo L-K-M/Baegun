@@ -125,7 +125,6 @@ fn extract_images(pages: &[OcrPage], include_images: bool) -> Result<(Vec<ImageA
             seen_placeholders.insert(image.id.clone());
 
             images.push(ImageAsset {
-                id: image.id.clone(),
                 file_name,
                 media_type,
                 bytes,
