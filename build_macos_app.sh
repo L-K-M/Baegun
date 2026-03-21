@@ -80,6 +80,7 @@ if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
   echo "Error: Python interpreter not found: $PYTHON_BIN" >&2
   exit 1
 fi
+PYTHON_RESOLVED="$(command -v "$PYTHON_BIN")"
 
 if [[ -n "$ICON_PATH" ]]; then
   if [[ "$ICON_PATH" != /* ]]; then
@@ -91,17 +92,90 @@ if [[ -n "$ICON_PATH" ]]; then
   fi
 fi
 
-echo "Checking tkinter availability in $PYTHON_BIN ..."
-if ! "$PYTHON_BIN" - <<'PY' >/dev/null 2>&1
+has_tkinter() {
+  local python_bin="$1"
+  "$python_bin" - <<'PY' >/dev/null 2>&1
 import _tkinter  # noqa: F401
 import tkinter   # noqa: F401
 PY
-then
-  cat >&2 <<'EOF'
-Error: tkinter is missing for the selected Python.
+}
 
-Use a Python build that includes Tk (for example Python.org Python),
-or install matching Tk support for Homebrew Python first.
+discover_tk_python() {
+  local candidate
+  local brew_prefix=""
+
+  if command -v brew >/dev/null 2>&1; then
+    brew_prefix="$(brew --prefix 2>/dev/null || true)"
+    for candidate in "$brew_prefix"/bin/python3 "$brew_prefix"/bin/python3.[0-9] "$brew_prefix"/bin/python3.[0-9][0-9]; do
+      [[ -x "$candidate" ]] || continue
+      [[ "$candidate" == "$PYTHON_RESOLVED" ]] && continue
+      if has_tkinter "$candidate"; then
+        echo "$candidate"
+        return 0
+      fi
+    done
+  fi
+
+  for candidate in /Library/Frameworks/Python.framework/Versions/*/bin/python3 /Library/Frameworks/Python.framework/Versions/*/bin/python3.[0-9] /Library/Frameworks/Python.framework/Versions/*/bin/python3.[0-9][0-9]; do
+    [[ -x "$candidate" ]] || continue
+    [[ "$candidate" == "$PYTHON_RESOLVED" ]] && continue
+    if has_tkinter "$candidate"; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+echo "Checking tkinter availability in $PYTHON_BIN ..."
+if ! has_tkinter "$PYTHON_BIN"; then
+  PYTHON_MM="$($PYTHON_BIN - <<'PY' 2>/dev/null || true
+import sys
+print(f"{sys.version_info.major}.{sys.version_info.minor}")
+PY
+)"
+  [[ -n "$PYTHON_MM" ]] || PYTHON_MM="<major.minor>"
+
+  BREW_PREFIX=""
+  if command -v brew >/dev/null 2>&1; then
+    BREW_PREFIX="$(brew --prefix 2>/dev/null || true)"
+  fi
+
+  ALT_TK_PYTHON="$(discover_tk_python || true)"
+
+  cat >&2 <<EOF
+Error: tkinter is missing for the selected Python: $PYTHON_BIN
+
+Tkinter is required to package the Baegun GUI app.
+EOF
+
+  if [[ -n "$ALT_TK_PYTHON" ]]; then
+    cat >&2 <<EOF
+
+Detected another Python with tkinter:
+  $ALT_TK_PYTHON
+
+Try:
+  ./build_macos_app.sh --python "$ALT_TK_PYTHON"
+EOF
+  fi
+
+  if [[ -n "$BREW_PREFIX" ]]; then
+    cat >&2 <<EOF
+
+Homebrew fix (Python and python-tk minor versions must match):
+  brew install "python@$PYTHON_MM" "python-tk@$PYTHON_MM"
+  "$BREW_PREFIX/bin/python$PYTHON_MM" -m tkinter
+  ./build_macos_app.sh --python "$BREW_PREFIX/bin/python$PYTHON_MM"
+EOF
+  fi
+
+  cat >&2 <<'EOF'
+
+Python.org fix:
+  /Library/Frameworks/Python.framework/Versions/<version>/bin/python3 -m tkinter
+  ./build_macos_app.sh --python /Library/Frameworks/Python.framework/Versions/<version>/bin/python3
 EOF
   exit 1
 fi

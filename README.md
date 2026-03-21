@@ -1,6 +1,6 @@
 # Baegun
 
-Baegun is a command-line and GUI Python tool that converts PDFs into high-fidelity EPUBs that retain images, formatting, tables, and structure, using MIstral's OCR service.
+Baegun is a command-line and GUI Python tool that converts PDFs into high-fidelity EPUBs that retain images, formatting, tables, and structure, using Mistral's OCR service.
 
 By default, Baegun also renders page 1 of the source PDF, uses it as the EPUB cover image, and attempts to set metadata, such as the author and book title.
 
@@ -16,34 +16,27 @@ Optional GUI dependencies:
 pipx install -e ".[gui]"
 ```
 
-or
+If `tkinter` is missing, use a Python build with Tk support and make sure Python and Tk are the same minor version.
+
+Homebrew example:
 
 ```bash
-brew install python-tk@3.13
-/opt/homebrew/bin/python3.12 -m tkinter
+brew install python@3.13 python-tk@3.13
+/opt/homebrew/bin/python3.13 -m tkinter
 pipx install --python /opt/homebrew/bin/python3.13 --editable '.[gui]'
+```
+
+Python.org example:
+
+```bash
+/Library/Frameworks/Python.framework/Versions/3.13/bin/python3.13 -m tkinter
+pipx install --python /Library/Frameworks/Python.framework/Versions/3.13/bin/python3.13 --editable '.[gui]'
 ```
 
 Update:
 
 ```bash
-pipx uninstall baegun
-pipx install --editable '.[gui]'
-```
-
-or: 
-
-```bash
 pipx install --force --editable '.[gui]'
-```
-
-If drag-and-drop to the file list doesn't work:
-
-```bash
-pipx uninstall baegun
-pipx install --python /opt/homebrew/bin/python3.12 --force --editable '.[gui]'
-~/.local/pipx/venvs/baegun/bin/python -m tkinter
-baegun-gui
 ```
 
 ## Quickstart
@@ -110,7 +103,13 @@ Useful options:
 
 ```bash
 ./build_macos_app.sh --icon ./assets/Baegun.icns --bundle-id com.example.baegun
-./build_macos_app.sh --python /Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12
+./build_macos_app.sh --python /Library/Frameworks/Python.framework/Versions/3.13/bin/python3.13
+```
+
+If the build script reports `tkinter` missing, run the script again with a Python interpreter that passes:
+
+```bash
+python3 -m tkinter
 ```
 
 The app is created at `dist/Baegun.app`.
