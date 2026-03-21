@@ -36,6 +36,8 @@
   let windowFocused = true;
   let isWindowShaded = false;
   let isDropActive = false;
+  let showSettingsDialog = false;
+  let outputDirDropArmed = false;
   let sortColumn: SortColumn = 'file';
   let sortDirection: 'asc' | 'desc' = 'asc';
 
@@ -49,7 +51,7 @@
   $: missingOutputDir = outputDir.trim().length === 0;
   $: convertDisabled = converting || pendingCount === 0 || missingApiKey || missingOutputDir;
   $: convertDisabledMessage = [
-    missingApiKey ? 'Set the API key first.' : '',
+    missingApiKey ? 'Set the API key in Settings first.' : '',
     missingOutputDir ? 'Choose an output directory first.' : '',
     !missingApiKey && !missingOutputDir && pendingCount === 0 ? 'Add at least one PDF first.' : ''
   ]
@@ -65,18 +67,31 @@
       const eventType = event?.payload?.type;
 
       if (eventType === 'enter' || eventType === 'over') {
-        isDropActive = true;
+        if (!outputDirDropArmed) {
+          isDropActive = true;
+        }
         return;
       }
 
       if (eventType === 'leave') {
         isDropActive = false;
+        outputDirDropArmed = false;
         return;
       }
 
       if (eventType === 'drop') {
+        const droppedPaths = (event.payload.paths as string[]) ?? [];
+        const droppedOnOutputDirectory = outputDirDropArmed;
+
         isDropActive = false;
-        addPaths((event.payload.paths as string[]) ?? []);
+        outputDirDropArmed = false;
+
+        if (droppedOnOutputDirectory) {
+          void setOutputDirectoryFromDrop(droppedPaths);
+          return;
+        }
+
+        addPaths(droppedPaths);
       }
     });
 
@@ -110,6 +125,55 @@
       return [];
     }
     return Array.isArray(selected) ? selected : [selected];
+  }
+
+  function openSettingsDialog() {
+    showSettingsDialog = true;
+  }
+
+  function closeSettingsDialog() {
+    showSettingsDialog = false;
+  }
+
+  async function setOutputDirectoryFromDrop(paths: string[]) {
+    for (const path of paths) {
+      try {
+        const isDirectory = await TauriService.isDirectory(path);
+        if (!isDirectory) {
+          continue;
+        }
+
+        outputDir = path;
+        notifications.add('Output directory set from dropped folder.', 'info');
+        return;
+      } catch {
+        continue;
+      }
+    }
+
+    addPaths(paths);
+  }
+
+  function handleOutputDirectoryDragEnter(event: DragEvent) {
+    event.preventDefault();
+    outputDirDropArmed = true;
+    isDropActive = false;
+  }
+
+  function handleOutputDirectoryDragOver(event: DragEvent) {
+    event.preventDefault();
+    outputDirDropArmed = true;
+    isDropActive = false;
+  }
+
+  function handleOutputDirectoryDragLeave(event: DragEvent) {
+    event.preventDefault();
+    const target = event.currentTarget as HTMLElement | null;
+    const next = event.relatedTarget as Node | null;
+
+    if (!target || !next || !target.contains(next)) {
+      outputDirDropArmed = false;
+    }
   }
 
   function addPaths(paths: string[]) {
@@ -151,7 +215,7 @@
     }
 
     if (missingApiKey) {
-      errorMessage = 'Missing API key. Enter one in the API key field.';
+      errorMessage = 'Missing API key. Open Settings and enter your Mistral key.';
       return;
     }
 
@@ -419,21 +483,29 @@
       </section>
 
       <section class="settings-panel">
-        <h2>Settings</h2>
+        <div class="settings-header">
+          <h2>Settings</h2>
+          <Button onclick={openSettingsDialog}>Settings...</Button>
+        </div>
 
-        <div class="credentials-row">
-          <label>
-            API key
-            <input type="password" bind:value={apiKey} placeholder="mistral-xxxxxxxxxxxxxxxxxxxxxxxx" />
-          </label>
+        <label>
+          Output directory
+          <div
+            class="path-row output-drop-target"
+            class:drop-armed={outputDirDropArmed}
+            role="group"
+            aria-label="Output directory drop target"
+            ondragenter={handleOutputDirectoryDragEnter}
+            ondragleave={handleOutputDirectoryDragLeave}
+            ondragover={handleOutputDirectoryDragOver}
+          >
+            <input type="text" bind:value={outputDir} placeholder="/Users/name/Books" />
+            <Button onclick={chooseOutputDirectory}>Choose</Button>
+          </div>
+        </label>
 
-          <label>
-            Output directory
-            <div class="path-row">
-              <input type="text" bind:value={outputDir} placeholder="/Users/name/Books" />
-              <Button onclick={chooseOutputDirectory}>Choose</Button>
-            </div>
-          </label>
+        <div class="settings-hint">
+          API key: {missingApiKey ? 'Not configured' : 'Configured'} (open Settings to change)
         </div>
 
         <div class="check-row">
@@ -460,6 +532,22 @@
         </div>
       </section>
     </main>
+  {/if}
+
+  {#if showSettingsDialog}
+    <ModalDialog width="500px" onclose={closeSettingsDialog}>
+      <div class="settings-dialog">
+        <h3>Settings</h3>
+        <label>
+          Mistral API key
+          <input type="password" bind:value={apiKey} placeholder="mistral-xxxxxxxxxxxxxxxxxxxxxxxx" />
+        </label>
+        <p class="settings-dialog-hint">This key is used for OCR requests to Mistral.</p>
+        <div class="settings-dialog-actions">
+          <Button variant="primary" onclick={closeSettingsDialog}>Done</Button>
+        </div>
+      </div>
+    </ModalDialog>
   {/if}
 
   {#if showProgressModal}
@@ -544,17 +632,27 @@
     align-items: center;
   }
 
-  .credentials-row {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-    align-items: start;
+  .output-drop-target.drop-armed {
+    outline: 2px dashed #365ea8;
+    outline-offset: 2px;
+    background: #eef4ff;
   }
 
   .check-row {
     display: flex;
     gap: 16px;
     flex-wrap: wrap;
+  }
+
+  .settings-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .settings-hint {
+    color: #444;
   }
 
   .settings-footer {
@@ -730,12 +828,26 @@
     color: #333;
   }
 
-  @media (max-width: 900px) {
-    .credentials-row {
-      grid-template-columns: 1fr;
-    }
+  .settings-dialog {
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
 
+  .settings-dialog-hint {
+    margin: 0;
+    color: #444;
+  }
+
+  .settings-dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+  }
+
+  @media (max-width: 900px) {
     .settings-footer,
+    .settings-header,
     .panel-header,
     .header-actions,
     .check-row {
