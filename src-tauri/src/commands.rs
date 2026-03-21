@@ -111,3 +111,8 @@ pub async fn convert_pdf(request: ConvertRequest) -> Result<ConvertResponse, Str
         validation_errors,
     })
 }
+
+#[tauri::command]
+pub async fn is_directory(path: String) -> Result<bool, String> {
+    Ok(PathBuf::from(path).is_dir())
+}
