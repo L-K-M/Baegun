@@ -84,6 +84,7 @@ Optional:
 - `orjson` for faster JSON
 - `python-dotenv` if `.env` loading is desired
 - `customtkinter` + `tkinterdnd2-universal` for the optional GUI frontend
+- `pyinstaller` for building a macOS `.app` bundle
 
 ## Proposed Project Layout
 
@@ -114,6 +115,7 @@ tests/
   test_pipeline_smoke.py
 pyproject.toml
 README.md
+build_macos_app.sh
 ```
 
 ## CLI Contract

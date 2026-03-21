@@ -98,6 +98,23 @@ GUI notes:
 - Settings are saved to `~/.baegun_gui_settings.json` between sessions.
 - `Comic Mode` disables API key requirements and uses image-render mode.
 
+### Build a macOS App Bundle (Optional)
+
+You can build a clickable `.app` bundle for the GUI:
+
+```bash
+./build_macos_app.sh
+```
+
+Useful options:
+
+```bash
+./build_macos_app.sh --icon ./assets/Baegun.icns --bundle-id com.example.baegun
+./build_macos_app.sh --python /Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12
+```
+
+The app is created at `dist/Baegun.app`.
+
 ## Command
 
 ```bash
