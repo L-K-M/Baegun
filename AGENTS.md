@@ -1,122 +1,66 @@
 # AGENTS.md
 
-Baegun is a Python tool that converts PDFs into high-fidelity EPUBs that retain images, formatting, tables, and structure, using MIstral's OCR service.
+Baegun is now a Rust/Tauri codebase.
 
-Baegun ships with a CLI frontend (`baegun`) and an optional desktop GUI frontend (`baegun-gui`).
+This document is the implementation handoff and must be kept in sync with the code.
 
-By default, Baegun also renders page 1 of the source PDF, uses it as the EPUB cover image, and attempts to set metadata, such as the author and book title.
+When behavior changes, also update `README.md`.
 
-This file is the full implementation handoff for building the `baegun` PDF -> EPUB pipeline and frontends.
+## Product Direction
 
-This is a living document. Always update it to reflect changes to code.
+Build one shared conversion engine and expose it through two frontends:
 
-When adding, removing, or altering features, also update user-facing documentation in README.md to reflect this.
+- CLI: `baegun`
+- Desktop app: Tauri (`src-tauri`) + SvelteKit (`src`) + `system7-ui`
 
-## Goal
+No Python runtime or Tk GUI remains in the main architecture.
 
-Build a CLI tool that takes a local PDF and produces a high-quality EPUB with:
-
-- OCR-backed extraction
-- preserved headings and chapter structure
-- extracted images
-- retained tables
-- reasonable preservation of callouts/boxes and reading order
-
-Primary command target:
-
-```bash
-baegun convert input.pdf -o output.epub --api-key <KEY>
-```
-
-## Scope and Non-goals (MVP)
-
-In scope:
-
-- Single-PDF conversion via CLI
-- Optional desktop GUI queue frontend (CustomTkinter + drag and drop)
-- Mistral OCR integration
-- Chapterized EPUB3 output
-- TOC generation
-- Image extraction and embedding
-- Table preservation
-- Optional EPUB validation with epubcheck
-
-Out of scope for MVP:
-
-- distributed processing
-- perfect page-faithful print reproduction
-- handwritten annotation reconstruction
-- footnote cross-link perfection for all edge cases
-
-## Chosen Approach (Option 2)
-
-LLM OCR-first parser + deterministic EPUB post-processor.
-
-Pipeline:
+## Current Architecture
 
 ```text
-PDF -> Mistral OCR JSON -> normalization -> structure inference -> XHTML/CSS -> EPUB package -> optional epubcheck
+PDF
+ -> Mistral OCR (files upload + OCR endpoint)
+ -> normalization (headers/footers, placeholders, images, tables)
+ -> chapter segmentation (H1 boundaries)
+ -> markdown -> HTML -> XHTML
+ -> EPUB 3 zip packaging
+ -> optional epubcheck validation
 ```
 
-**Alternative Comic Pipeline:**
-For comic books, Baegun bypasses OCR and uses `pypdfium2` to rapidly render each PDF page straight to image chapters.
-```text
-PDF -> per-page image render (comic.py) -> XHTML/CSS -> EPUB package -> optional epubcheck
-```
+Shared modules live in `crates/baegun-core` and are used by both CLI and Tauri command handlers.
 
-## Technical Stack
-
-Python 3.11+
-
-Recommended libraries:
-
-- CLI: `typer`, `rich`
-- OCR client: `mistralai`
-- Models/config: `pydantic`
-- Markdown to HTML: `markdown` (Python-Markdown)
-- HTML post-processing: `beautifulsoup4`, `lxml`
-- EPUB build: `ebooklib`
-- Retry: `tenacity`
-- Testing: `pytest`, `pytest-cov`
-
-Optional:
-
-- `orjson` for faster JSON
-- `python-dotenv` if `.env` loading is desired
-- `customtkinter` + `tkinterdnd2-universal` for the optional GUI frontend
-- `pyinstaller` for building a macOS `.app` bundle
-
-## Proposed Project Layout
+## Workspace Layout
 
 ```text
-src/
-  baegun/
-    __init__.py
-    cli.py
-    gui.py
-    config.py
-    models.py
-    mistral_client.py
-    cache.py
-    comic.py
-    normalize.py
-    structure.py
-    render.py
-    epub_builder.py
-    validate.py
-    utils.py
-tests/
-  fixtures/
-  test_cli.py
-  test_normalize.py
-  test_structure.py
-  test_render.py
-  test_epub_builder.py
-  test_pipeline_smoke.py
-pyproject.toml
-README.md
-build_macos_app.sh
+Cargo.toml              # workspace
+crates/
+  baegun-core/          # shared conversion pipeline
+  baegun-cli/           # `baegun` binary
+src/                    # SvelteKit app using system7-ui
+src-tauri/              # Tauri host and command bridge
 ```
+
+## Core API (`baegun-core`)
+
+Main entry point:
+
+- `convert_pdf_to_epub(cfg: &ConvertConfig) -> Result<ConvertSummary>`
+
+Important types:
+
+- `ConvertConfig`
+- `TableFormat`
+- `ConvertSummary`
+- `ValidationResult`
+- `BaegunError` (`ErrorKind` includes CLI-friendly exit mapping)
+
+Key modules:
+
+- `mistral.rs`: file upload + OCR request + retry + cleanup
+- `cache.rs`: `.baegun-cache` SHA256-keyed OCR payload cache
+- `normalize.rs`: placeholder replacement, chapterization, XHTML rendering
+- `epub.rs`: EPUB packaging (zip + `content.opf` + `nav.xhtml`)
+- `validate.rs`: optional `epubcheck` execution
 
 ## CLI Contract
 
@@ -126,408 +70,115 @@ Command:
 baegun convert INPUT_PDF [OPTIONS]
 ```
 
-Options (MVP defaults):
+Notable options:
 
-- `-o, --output PATH` output epub path (default: same name as input with `.epub`)
-- `--api-key TEXT` (fallback `MISTRAL_API_KEY`)
-- `--model TEXT` default `mistral-ocr-latest`
-- `--title TEXT` optional metadata override
-- `--author TEXT` optional metadata
-- `--language TEXT` default `en`
-- `--publisher TEXT` optional metadata
-- `--table-format [html|markdown]` default `html`
-- `--extract-header/--no-extract-header` default `true`
-- `--extract-footer/--no-extract-footer` default `true`
-- `--include-images/--no-images` default `true`
-- `--comic/--no-comic` render PDF to images and bypass OCR (default: `false`)
-- `--cache-dir PATH` default `.baegun-cache`
-- `--no-cache` disable cache
-- `--validate` run epubcheck if present
-- `--epubcheck-bin TEXT` default `epubcheck`
-- `--debug-dir PATH` dump intermediate artifacts
-- `--keep-remote-file` do not delete uploaded file from Mistral
-- `--fail-on-warn` treat validation warnings as error
-- `--quiet` minimal output
-- `--verbose` detailed output
+- `-o, --output`
+- `--api-key` (fallback `MISTRAL_API_KEY`)
+- `--model` (default `mistral-ocr-latest`)
+- `--table-format html|markdown`
+- `--extract-header true|false`
+- `--extract-footer true|false`
+- `--include-images true|false`
+- `--cache-dir`
+- `--no-cache`
+- `--validate`
+- `--epubcheck-bin`
+- `--debug-dir`
+- `--keep-remote-file`
+- `--fail-on-warn`
+- `--quiet`
+- `--verbose`
 
-Exit codes:
+Exit code mapping:
 
-- `0` success
-- `2` bad CLI arguments or missing input
-- `3` API auth or quota error
-- `4` OCR response/schema error
-- `5` EPUB build error
-- `6` validation failed (if `--validate`)
-- `1` unexpected internal error
+- `2` bad args/config
+- `3` API/auth/quota/network errors
+- `4` OCR schema/parsing issues
+- `5` EPUB build/write issues
+- `6` validation failure
+- `1` all other internal failures
 
-## Mistral API Notes (critical)
+## Desktop App Contract
 
-Use OCR endpoint with model `mistral-ocr-latest`.
+Frontend: `src/routes/+page.svelte`.
 
-Prefer local file upload flow:
+Backend command:
 
-1. Upload PDF via Files API with purpose `ocr`
-2. Call OCR with `document={"type":"file", "file_id": <id>}` (or equivalent SDK shape)
-3. Optional cleanup: delete uploaded file
+- `convert_pdf(request: ConvertRequest) -> ConvertResponse`
 
-OCR request fields to use:
+The desktop app should remain a thin orchestrator over the shared `baegun-core` conversion logic.
 
-- `table_format="html"` (best for EPUB fidelity)
-- `extract_header=true`
-- `extract_footer=true`
-- `include_image_base64=true` (for embedded image assets)
+Drag-and-drop is handled through Tauri window drag-drop events, while file/folder picking uses `@tauri-apps/plugin-dialog`.
 
-OCR response essentials:
+## system7-ui Integration
 
-- `pages[]`
-  - `index`
-  - `markdown`
-  - `images[]` (image id, bbox, base64 when enabled)
-  - `tables[]` (when table format requested)
-  - `header`, `footer` (if requested)
-  - `dimensions`
-- `usage_info`
+Frontend imports:
 
-Placeholder behavior:
+- `@lkmc/system7-ui/styles.css` in `src/routes/+layout.svelte`
+- Components from `@lkmc/system7-ui` in page/UI components
 
-- image placeholder example: `![img-0.jpeg](img-0.jpeg)`
-- table placeholder example: `[tbl-3.html](tbl-3.html)`
+Dependency source is local sibling repo:
 
-Implementation must map placeholders to real extracted assets/content.
+- `@lkmc/system7-ui`: `file:../system7-ui`
 
-## Internal Data Model (IR)
+Reference apps for style/patterns:
 
-Keep everything in a canonical intermediate representation before rendering EPUB.
+- `../Lantenna`
+- `../Obtainintosh`
 
-Core objects:
+## Mistral OCR Notes
 
-- `DocumentIR`
-  - metadata (`title`, `author`, `language`, `source_pdf_sha256`)
-  - `pages: list[PageIR]`
-  - `chapters: list[ChapterIR]`
-  - `toc: list[TocEntryIR]`
-  - `assets: dict[str, AssetIR]`
-- `PageIR`
-  - page index
-  - normalized markdown
-  - normalized html fragment
-  - source headers/footers
-- `AssetIR`
-  - asset id
-  - type (`image`, `table_html`)
-  - content/path
-  - mime type
-  - source page
-- `ChapterIR`
-  - id/slug
-  - title
-  - html content
-  - order
-- `TocEntryIR`
-  - title
-  - href
-  - level
+Preferred flow:
 
-## Module Responsibilities
+1. `POST /v1/files` (`purpose=ocr`) with PDF file
+2. `POST /v1/ocr` using uploaded `file_id`
+3. Optional `DELETE /v1/files/{id}` cleanup
 
-### `config.py`
+Request fields used:
 
-- Parse CLI options into typed config
-- Resolve API key from option/env
-- Validate paths and defaults
+- `model`
+- `table_format`
+- `extract_header`
+- `extract_footer`
+- `include_image_base64`
 
-### `mistral_client.py`
+OCR payloads are expected to include `pages[]` with markdown + optional images/tables.
 
-- SDK wrapper around file upload + OCR call + optional remote delete
-- Retry transient failures with exponential backoff
-- Convert API exceptions into typed internal errors
+## EPUB Packaging Rules
 
-### `cache.py`
+Generated archive includes:
 
-- Cache key = SHA256(input PDF bytes + model + OCR options + tool version)
-- Store raw OCR JSON and optional normalized IR snapshot
-- Provide cache hit/miss telemetry
-
-### `comic.py`
-
-- Bypasses Mistral OCR via `--comic` mode
-- Extracts pages directly as JPEG assets using `pypdfium2`
-- Builds dummy `DocumentIR` encapsulating image references as chapters
-
-### `normalize.py`
-
-- Merge per-page markdown while preserving page boundaries
-- Replace image placeholders with local references
-- Resolve table placeholders with HTML tables
-- Remove duplicated headers/footers heuristically
-- Clean OCR artifacts:
-  - dehyphenate line-break splits
-  - normalize whitespace
-  - preserve code fences
-
-### `structure.py`
-
-- Build heading tree from markdown headings
-- Normalize heading level jumps (no h1 -> h4 leaps)
-- Split chapters by H1 primarily, fallback H2 with min content threshold
-- Generate TOC entries from chapter boundaries and internal headings
-
-### `render.py`
-
-- Convert markdown to XHTML-compatible HTML
-- Inject anchors for headings
-- Preserve inline HTML tables
-- Wrap in valid XHTML skeleton
-- Apply semantic classes for callouts/boxes/figures/tables
-
-### `epub_builder.py`
-
-- Create EPUB3 package via EbookLib
-- Add metadata (`dc:title`, `dc:creator`, language)
-- Add stylesheet, chapter docs, images, nav doc
-- Build spine and manifest deterministically
-
-### `validate.py`
-
-- Run `epubcheck` subprocess if requested
-- Parse output summary
-- Fail based on `--fail-on-warn` policy
-
-### `cli.py`
-
-- Orchestrate full pipeline
-- Show progress stages
-- Map exceptions to exit codes
-
-## Key Algorithms
-
-### 1) Header/footer dedupe
-
-- If `extract_header/footer` used, compare extracted header/footer against nearby body text and remove duplicates.
-- Also remove repeated top/bottom lines recurring on >= 60% of pages.
-
-### 2) Heading normalization
-
-- Trust markdown heading markers from OCR first.
-- If heading levels jump by > 1, compress (e.g. h4 after h1 -> h2).
-- If no headings found, infer candidates from short standalone lines with title-like patterns and spacing heuristics.
-
-### 3) Chapter segmentation
-
-Order of rules:
-
-1. split on H1
-2. if no H1, split on H2 where preceding chunk exceeds minimum size
-3. if still no split, single chapter document
-
-Safety:
-
-- minimum chapter char count default 1200
-- merge tiny trailing chapters into previous
-
-### 4) Image extraction and replacement
-
-- Decode base64 images from OCR response
-- Save to `OEBPS/images/` using stable names
-- Replace markdown image refs to relative XHTML-safe paths
-- preserve alt text where available
-
-### 5) Table retention
-
-- Prefer provided table HTML when available
-- Replace table placeholders with raw table HTML block
-- fallback to markdown table rendering if table object missing
-
-### 6) Callouts and boxes
-
-- Map markdown blockquotes to `<aside class="callout">`
-- Detect OCR patterns like `Note:`/`Warning:` lines and style with callout CSS class
-
-## EPUB Output Design
-
-Output structure in package:
-
-- `mimetype`
+- `mimetype` (stored/uncompressed)
 - `META-INF/container.xml`
 - `OEBPS/content.opf`
 - `OEBPS/nav.xhtml`
 - `OEBPS/styles/book.css`
-- `OEBPS/text/chapter-001.xhtml`, ...
+- `OEBPS/text/chapter-*.xhtml`
 - `OEBPS/images/*`
 
-CSS goals:
+## Operational Notes
 
-- sensible heading scale
-- readable body typography
-- table styling for overflow and borders
-- figure captions
-- callout boxes
+- Keep core conversion behavior deterministic.
+- Keep cache key tied to PDF bytes + OCR-relevant options + pipeline version.
+- Keep frontend and CLI behavior aligned for the same config.
+- Keep Tauri command payloads serializable and stable.
 
-## Determinism and Caching
+## Testing and Validation
 
-- Always sort chapters/assets deterministically.
-- Use stable slugs for chapter filenames.
-- Cache OCR response by content hash to avoid repeat API cost.
-- Include a `pipeline_version` in cache key so format changes invalidate cleanly.
-
-## Error Handling Matrix
-
-- Missing API key -> user-facing message + exit `2`
-- 401/403 from Mistral -> exit `3`
-- 429/5xx -> retry; final failure exit `3`
-- OCR schema mismatch -> dump raw payload in debug dir + exit `4`
-- EPUB build failure -> exit `5`
-- epubcheck errors -> exit `6`
-
-## Implementation Plan (ordered)
-
-### Phase 0 - Bootstrap
-
-1. Create package skeleton under `src/baegun`.
-2. Add `pyproject.toml` with dependencies and console entrypoint `baegun=baegun.cli:app`.
-3. Add initial `README.md` with quickstart.
-
-### Phase 1 - CLI and config
-
-1. Implement `convert` command and options.
-2. Implement config resolution (CLI > env > defaults).
-3. Add path validation and output naming.
-
-### Phase 2 - Mistral integration
-
-1. Implement file upload (purpose `ocr`).
-2. Implement OCR request with selected params.
-3. Implement optional remote file deletion.
-4. Add retries and typed exceptions.
-
-### Phase 3 - Cache layer
-
-1. Implement PDF hash and cache key.
-2. Save/load OCR JSON.
-3. Respect `--no-cache`.
-
-### Phase 4 - Normalization
-
-1. Parse OCR pages into IR.
-2. Extract images to temp assets.
-3. Resolve table placeholders.
-4. Header/footer dedupe and markdown cleanup.
-
-### Phase 5 - Structure and rendering
-
-1. Heading normalization.
-2. Chapter segmentation + TOC creation.
-3. Markdown->XHTML rendering with heading anchors.
-4. Generate shared CSS.
-
-### Phase 6 - EPUB build and validate
-
-1. Build EPUB package with metadata/spine/nav/assets.
-2. Write output file.
-3. Optional epubcheck execution and policy handling.
-
-### Phase 7 - Tests and hardening
-
-1. Unit tests for normalization/structure/rendering.
-2. API client tests with mocked SDK.
-3. End-to-end smoke test using a frozen OCR fixture JSON.
-4. Validate deterministic output checksums in test mode.
-
-## Test Plan
-
-Unit tests:
-
-- placeholder replacement for images and tables
-- header/footer dedupe logic
-- chapter splitting heuristics
-- toc generation correctness
-- filename slug stability
-
-Integration tests:
-
-- build EPUB from fixture OCR JSON without hitting network
-- assert `content.opf`, `nav.xhtml`, chapter files, images exist
-
-Manual QA checklist:
-
-1. Convert sample digital PDF with headings and images.
-2. Open EPUB in Calibre and Apple Books.
-3. Verify TOC links and chapter ordering.
-4. Verify table rendering and image positions.
-5. Run epubcheck and inspect warnings/errors.
-
-## Definition of Done
-
-Done when all are true:
-
-- CLI converts a local PDF to `.epub` using Mistral key
-- images and tables appear in resulting EPUB
-- headings become coherent chapter structure and TOC
-- output passes `epubcheck` in default sample test
-- tests pass in CI/local
-- README documents install and usage
-
-## Security and Privacy Notes
-
-- PDF content is sent to Mistral OCR API.
-- Cache may contain extracted text and images; document this clearly.
-- Provide `--no-cache` for sensitive workflows.
-- By default, delete uploaded remote file after OCR unless `--keep-remote-file` is set.
-
-## Suggested Initial Commands
-
-If starting from empty repo:
+Preferred checks (when toolchain is available):
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -U pip
-pip install typer rich mistralai pydantic markdown beautifulsoup4 lxml ebooklib tenacity pytest pytest-cov
+cargo fmt --all
+cargo check --workspace
+npm run check
 ```
 
-Run CLI locally:
+If `epubcheck` is installed, test one end-to-end conversion with `--validate`.
 
-```bash
-export MISTRAL_API_KEY=...
-baegun convert ./sample.pdf -o ./sample.epub --validate
-```
+## Backlog Ideas
 
-## Suggested Function Signatures (guide)
-
-```python
-def convert_pdf_to_epub(cfg: ConvertConfig) -> Path: ...
-
-def run_ocr(pdf_path: Path, cfg: OcrConfig) -> dict: ...
-
-def normalize_ocr_payload(payload: dict, cfg: NormalizeConfig) -> DocumentIR: ...
-
-def build_structure(doc: DocumentIR, cfg: StructureConfig) -> DocumentIR: ...
-
-def render_chapters(doc: DocumentIR, cfg: RenderConfig) -> RenderedBook: ...
-
-def build_epub(rendered: RenderedBook, cfg: EpubConfig) -> Path: ...
-
-def run_epubcheck(epub_path: Path, bin_path: str) -> ValidationResult: ...
-```
-
-## Known Risks and Mitigations
-
-- OCR heading inconsistency -> normalization and fallback splitting
-- missing table payload fields -> fallback markdown table rendering
-- large PDFs and high cost -> page selection option in future (`--pages`)
-- malformed markdown -> sanitize through HTML parser before XHTML output
-
-## Post-MVP Roadmap
-
-- batch mode for folders
-- optional parallel per-document processing
-- better footnote/endnote linking
-- improved math rendering path
-- custom CSS themes
-- optional open-source OCR fallback
-
-## Immediate Next Task After Context Reset
-
-Start with Phase 0 and Phase 1 only, then run a tiny smoke test with a mocked OCR payload before integrating real API calls.
-
-This keeps feedback loop fast and avoids API cost early.
+- Add progress events from backend to frontend (stream stage updates)
+- Better heading normalization and chapter merging heuristics
+- Better table placeholder recovery when OCR returns unusual shapes
+- Add batch folder conversion command to CLI
+- Add robust integration tests with fixed OCR fixtures in Rust

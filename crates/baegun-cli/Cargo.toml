@@ -1,0 +1,13 @@
+[package]
+name = "baegun-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "baegun"
+path = "src/main.rs"
+
+[dependencies]
+baegun-core = { path = "../baegun-core" }
+clap.workspace = true

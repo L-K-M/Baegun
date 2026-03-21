@@ -1,34 +1,12 @@
-# Python bytecode and caches
-__pycache__/
-*.py[cod]
-*$py.class
-
-# Virtual environments
-.venv/
-venv/
-env/
-ENV/
-
-# Packaging / build outputs
+# Node / SvelteKit
+node_modules/
+.svelte-kit/
 build/
 dist/
-.eggs/
-*.egg-info/
-*.egg
-pip-wheel-metadata/
 
-# Test, lint, and type-check caches
-.pytest_cache/
-.coverage
-.coverage.*
-coverage.xml
-htmlcov/
-.mypy_cache/
-.ruff_cache/
-.pyre/
-.hypothesis/
-.tox/
-.nox/
+# Rust / Tauri
+target/
+src-tauri/target/
 
 # Local tooling / editor files
 .vscode/
@@ -47,4 +25,8 @@ Thumbs.db
 
 # Local project metadata
 .codenomad/
-test-files
+test-files/
+
+# Local temporary environments
+.venv/
+.baegun-build-venv/
