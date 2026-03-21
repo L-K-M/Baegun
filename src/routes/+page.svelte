@@ -3,6 +3,7 @@
   import { open } from '@tauri-apps/plugin-dialog';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import {
+    BalloonHelp,
     Button,
     Checkbox,
     DownloadIcon,
@@ -39,6 +40,16 @@
 
   $: pendingCount = jobs.filter((job) => job.status === 'pending').length;
   $: doneCount = jobs.filter((job) => job.status === 'done').length;
+  $: missingApiKey = apiKey.trim().length === 0;
+  $: missingOutputDir = outputDir.trim().length === 0;
+  $: convertDisabled = converting || pendingCount === 0 || missingApiKey || missingOutputDir;
+  $: convertDisabledMessage = [
+    missingApiKey ? 'Set the API key first.' : '',
+    missingOutputDir ? 'Choose an output directory first.' : '',
+    !missingApiKey && !missingOutputDir && pendingCount === 0 ? 'Add at least one PDF first.' : ''
+  ]
+    .filter(Boolean)
+    .join('\n');
 
   onMount(() => {
     const unlistenFocus = appWindow.onFocusChanged(({ payload }) => {
@@ -134,8 +145,13 @@
       return;
     }
 
-    if (!apiKey.trim()) {
+    if (missingApiKey) {
       errorMessage = 'Missing API key. Enter one in the API key field.';
+      return;
+    }
+
+    if (missingOutputDir) {
+      errorMessage = 'Missing output directory. Choose a directory for EPUB output.';
       return;
     }
 
@@ -156,7 +172,7 @@
       updateJob(job.id, { status: 'running', message: undefined });
       statusMessage = `Converting ${basename(job.path)}...`;
 
-      const outputPath = outputDir ? deriveOutputPath(outputDir, job.path) : null;
+      const outputPath = deriveOutputPath(outputDir.trim(), job.path);
 
       const request: ConvertRequest = {
         input_path: job.path,
@@ -308,18 +324,20 @@
       <section class="settings-panel">
         <h2>Settings</h2>
 
-        <label>
-          API key
-          <input type="password" bind:value={apiKey} placeholder="mistral-xxxxxxxxxxxxxxxxxxxxxxxx" />
-        </label>
+        <div class="credentials-row">
+          <label>
+            API key
+            <input type="password" bind:value={apiKey} placeholder="mistral-xxxxxxxxxxxxxxxxxxxxxxxx" />
+          </label>
 
-        <label>
-          Output directory (optional)
-          <div class="path-row">
-            <input type="text" bind:value={outputDir} placeholder="same folder as each source PDF" />
-            <Button onclick={chooseOutputDirectory}>Choose</Button>
-          </div>
-        </label>
+          <label>
+            Output directory
+            <div class="path-row">
+              <input type="text" bind:value={outputDir} placeholder="/Users/name/Books" />
+              <Button onclick={chooseOutputDirectory}>Choose</Button>
+            </div>
+          </label>
+        </div>
 
         <div class="check-row">
           <Checkbox
@@ -332,12 +350,16 @@
 
         <div class="settings-footer">
           <div class="queue-meta">Pending: {pendingCount} · Done: {doneCount}</div>
-          <Button variant="primary" onclick={convertAll} disabled={converting || pendingCount === 0}>
-            <span class="convert-button-content">
-              <DownloadIcon alt="Convert" size={14} />
-              Convert All
+          <BalloonHelp message={convertDisabled ? convertDisabledMessage : ''} position="top" delay={250}>
+            <span>
+              <Button variant="primary" onclick={convertAll} disabled={convertDisabled}>
+                <span class="convert-button-content">
+                  <DownloadIcon alt="Convert" size={14} />
+                  Convert All
+                </span>
+              </Button>
             </span>
-          </Button>
+          </BalloonHelp>
         </div>
       </section>
     </main>
@@ -433,6 +455,13 @@
     grid-template-columns: minmax(220px, 1fr) auto;
     gap: 6px;
     align-items: center;
+  }
+
+  .credentials-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    align-items: start;
   }
 
   .check-row {
@@ -598,6 +627,10 @@
   }
 
   @media (max-width: 900px) {
+    .credentials-row {
+      grid-template-columns: 1fr;
+    }
+
     .settings-footer,
     .panel-header,
     .header-actions,
