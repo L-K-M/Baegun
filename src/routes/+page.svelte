@@ -19,6 +19,8 @@
   import { notifications } from '$lib/util/notifications';
   import { WindowManager } from '$lib/windowManager';
 
+  type SortColumn = 'file' | 'status' | 'output' | 'detail';
+
   let jobs: ConversionJob[] = [];
   let apiKey = '';
   let outputDir = '';
@@ -34,12 +36,15 @@
   let windowFocused = true;
   let isWindowShaded = false;
   let isDropActive = false;
+  let sortColumn: SortColumn = 'file';
+  let sortDirection: 'asc' | 'desc' = 'asc';
 
   const appWindow = getCurrentWindow();
   const windowManager = new WindowManager();
 
   $: pendingCount = jobs.filter((job) => job.status === 'pending').length;
   $: doneCount = jobs.filter((job) => job.status === 'done').length;
+  $: sortedJobs = [...jobs].sort((left, right) => compareJobs(left, right, sortColumn, sortDirection));
   $: missingApiKey = apiKey.trim().length === 0;
   $: missingOutputDir = outputDir.trim().length === 0;
   $: convertDisabled = converting || pendingCount === 0 || missingApiKey || missingOutputDir;
@@ -233,6 +238,62 @@
     return `${normalizedDir}${separator}${file}.epub`;
   }
 
+  function sortBy(column: SortColumn) {
+    if (sortColumn === column) {
+      sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+      return;
+    }
+
+    sortColumn = column;
+    sortDirection = 'asc';
+  }
+
+  function getAriaSort(column: SortColumn): 'ascending' | 'descending' | 'none' {
+    if (sortColumn !== column) {
+      return 'none';
+    }
+    return sortDirection === 'asc' ? 'ascending' : 'descending';
+  }
+
+  function compareJobs(
+    left: ConversionJob,
+    right: ConversionJob,
+    column: SortColumn,
+    direction: 'asc' | 'desc'
+  ): number {
+    const multiplier = direction === 'asc' ? 1 : -1;
+
+    if (column === 'status') {
+      const statusRank: Record<ConversionJob['status'], number> = {
+        pending: 0,
+        running: 1,
+        done: 2,
+        error: 3
+      };
+      const result = (statusRank[left.status] - statusRank[right.status]) * multiplier;
+      return result || compareText(basename(left.path), basename(right.path), multiplier);
+    }
+
+    const leftText = getSortText(left, column);
+    const rightText = getSortText(right, column);
+    const result = compareText(leftText, rightText, multiplier);
+    return result || compareText(basename(left.path), basename(right.path), 1);
+  }
+
+  function getSortText(job: ConversionJob, column: SortColumn): string {
+    if (column === 'file') {
+      return basename(job.path);
+    }
+    if (column === 'output') {
+      return job.outputPath || '';
+    }
+    return job.message || '';
+  }
+
+  function compareText(left: string, right: string, multiplier: number): number {
+    return left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' }) * multiplier;
+  }
+
   function handleWindowClose() {
     windowManager.close();
   }
@@ -246,7 +307,7 @@
   }
 </script>
 
-<div class="window-frame" class:window-unfocused={!windowFocused}>
+<div class="window-frame s7-root" class:window-unfocused={!windowFocused}>
   <TitleBar
     title="Baegun"
     focused={windowFocused}
@@ -280,10 +341,46 @@
             <table>
               <thead>
                 <tr>
-                  <th class="col-file">File</th>
-                  <th class="col-status">Status</th>
-                  <th class="col-output">Output</th>
-                  <th class="col-detail">Details</th>
+                  <th class="col-file" aria-sort={getAriaSort('file')}>
+                    <button
+                      type="button"
+                      class="sort-button"
+                      class:is-active={sortColumn === 'file'}
+                      onclick={() => sortBy('file')}
+                    >
+                      File
+                    </button>
+                  </th>
+                  <th class="col-status" aria-sort={getAriaSort('status')}>
+                    <button
+                      type="button"
+                      class="sort-button"
+                      class:is-active={sortColumn === 'status'}
+                      onclick={() => sortBy('status')}
+                    >
+                      Status
+                    </button>
+                  </th>
+                  <th class="col-output" aria-sort={getAriaSort('output')}>
+                    <button
+                      type="button"
+                      class="sort-button"
+                      class:is-active={sortColumn === 'output'}
+                      onclick={() => sortBy('output')}
+                    >
+                      Output
+                    </button>
+                  </th>
+                  <th class="col-detail" aria-sort={getAriaSort('detail')}>
+                    <button
+                      type="button"
+                      class="sort-button"
+                      class:is-active={sortColumn === 'detail'}
+                      onclick={() => sortBy('detail')}
+                    >
+                      Details
+                    </button>
+                  </th>
                 </tr>
               </thead>
             </table>
@@ -299,12 +396,12 @@
                     </td>
                   </tr>
                 {:else}
-                  {#each jobs as job (job.id)}
+                  {#each sortedJobs as job (job.id)}
                     <tr>
                       <td class="col-file">
                         <div class="file-cell">
                           <span class="file-icon" aria-hidden="true">📄</span>
-                          <span class="file-name">{basename(job.path)}</span>
+                          <span class="file-name" title={basename(job.path)}>{basename(job.path)}</span>
                         </div>
                       </td>
                       <td class="col-status">
@@ -386,12 +483,6 @@
     box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.2);
     display: flex;
     flex-direction: column;
-    font-family: 'Geneva', 'Verdana', 'Helvetica', sans-serif;
-    font-size: 14px;
-  }
-
-  .window-frame :global(.title-text span) {
-    font-size: 18px !important;
   }
 
   .app-content {
@@ -431,7 +522,6 @@
   h2,
   h3 {
     margin: 0;
-    font-size: 15px;
     font-weight: 700;
   }
 
@@ -439,15 +529,12 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
-    font-size: 13px;
   }
 
   input[type='text'],
   input[type='password'] {
     border: 1px solid #000;
     padding: 6px 8px;
-    font-family: 'Geneva', 'Verdana', 'Helvetica', sans-serif;
-    font-size: 13px;
   }
 
   .path-row {
@@ -480,7 +567,6 @@
 
   .queue-meta {
     color: #444;
-    font-size: 12px;
   }
 
   .convert-button-content {
@@ -523,8 +609,6 @@
     width: 100%;
     border-collapse: collapse;
     table-layout: fixed;
-    font-family: 'Geneva', 'Verdana', 'Helvetica', sans-serif;
-    font-size: 13px;
   }
 
   th,
@@ -536,10 +620,25 @@
   }
 
   th {
-    font-size: 12px;
-    text-transform: uppercase;
     letter-spacing: 0.04em;
     color: #222;
+  }
+
+  .sort-button {
+    appearance: none;
+    border: none;
+    background: transparent;
+    padding: 0;
+    margin: 0;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+    text-decoration: none;
+  }
+
+  .sort-button.is-active {
+    text-decoration: underline;
+    text-underline-offset: 2px;
   }
 
   tr:last-child td {
@@ -574,7 +673,14 @@
     text-align: center;
   }
 
-  .file-name,
+  .file-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .col-output,
   .col-detail {
     overflow-wrap: anywhere;
@@ -582,7 +688,6 @@
 
   .status {
     text-transform: uppercase;
-    font-size: 11px;
     font-weight: 700;
     letter-spacing: 0.05em;
   }
@@ -619,7 +724,6 @@
 
   .progress-modal p {
     margin: 0;
-    font-size: 13px;
   }
 
   .modal-meta {
