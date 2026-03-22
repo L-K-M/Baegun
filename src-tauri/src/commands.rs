@@ -42,7 +42,7 @@ pub struct ConvertResponse {
     pub validation_errors: usize,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ConvertProgressEvent {
     pub input_path: String,
     pub output_path: String,

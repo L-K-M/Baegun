@@ -58,6 +58,17 @@ Build CLI binary:
 cargo build -p baegun-cli --release
 ```
 
+## Quality Gates
+
+Automatic checks are wired into both commits and builds:
+
+- `npm run build` runs `npm run verify` first, which runs:
+  - `npm run check`
+  - `npm run test` (`cargo test --workspace`)
+- Git pre-commit hook runs `npm run verify` automatically.
+
+If you commit from IntelliJ, keep **Run Git hooks** enabled in the commit dialog.
+
 ## CLI Usage
 
 ```bash

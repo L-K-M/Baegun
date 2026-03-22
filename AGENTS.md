@@ -187,5 +187,5 @@ If `epubcheck` is installed, test one end-to-end conversion with `--validate`.
 
 ## Backlog Ideas
 
-- Better heading normalization and chapter merging heuristics
-- Better table placeholder recovery when OCR returns unusual shapes
+- Tune chapter merge/split thresholds with a broader OCR fixture corpus
+- Add additional table-placeholder fixture variants from real OCR edge cases

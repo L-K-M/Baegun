@@ -1,6 +1,7 @@
 use crate::errors::{BaegunError, Result};
 use crate::models::{
-    ConvertConfig, ImageAsset, MistralOcrResponse, OcrPage, RenderedBook, RenderedChapter, TableFormat,
+    ConvertConfig, ImageAsset, MistralOcrResponse, OcrPage, OcrTable, RenderedBook,
+    RenderedChapter, TableFormat,
 };
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
@@ -163,11 +164,6 @@ fn strip_header_footer(mut markdown: String, header: Option<&str>, footer: Optio
 
 fn replace_table_placeholders(mut markdown: String, page: &OcrPage, table_format: TableFormat) -> String {
     for (index, table) in page.tables.iter().enumerate() {
-        let table_id = table
-            .id
-            .clone()
-            .unwrap_or_else(|| format!("tbl-{}-{}.html", page.index, index));
-
         let replacement = match table_format {
             TableFormat::Html => table
                 .html
@@ -185,20 +181,69 @@ fn replace_table_placeholders(mut markdown: String, page: &OcrPage, table_format
             continue;
         };
 
-        let direct_placeholder = format!("[{table_id}]({table_id})");
-        if markdown.contains(&direct_placeholder) {
-            markdown = markdown.replace(&direct_placeholder, &format!("\n{content}\n"));
-            continue;
-        }
-
-        if let Ok(regex) = Regex::new(&format!(r"\[[^\]]*\]\({}\)", regex::escape(&table_id))) {
-            markdown = regex
-                .replace_all(&markdown, format!("\n{content}\n"))
-                .to_string();
+        let identifiers = collect_table_identifiers(table, page.index, index);
+        for identifier in identifiers {
+            markdown = replace_table_reference(markdown, &identifier, &content);
         }
     }
 
     markdown
+}
+
+fn collect_table_identifiers(table: &OcrTable, page_index: usize, index: usize) -> Vec<String> {
+    let mut identifiers = Vec::new();
+
+    let mut push_unique = |value: Option<&str>| {
+        let Some(raw) = value else {
+            return;
+        };
+
+        let candidate = raw.trim();
+        if candidate.is_empty() {
+            return;
+        }
+
+        if !identifiers.iter().any(|existing| existing == candidate) {
+            identifiers.push(candidate.to_owned());
+        }
+    };
+
+    push_unique(table.id.as_deref());
+    push_unique(table.extra.get("table_id").and_then(|value| value.as_str()));
+    push_unique(table.extra.get("id").and_then(|value| value.as_str()));
+    push_unique(table.extra.get("file_name").and_then(|value| value.as_str()));
+    push_unique(table.extra.get("path").and_then(|value| value.as_str()));
+    push_unique(table.extra.get("placeholder").and_then(|value| value.as_str()));
+
+    let fallback = format!("tbl-{page_index}-{index}.html");
+    if !identifiers.iter().any(|existing| existing == &fallback) {
+        identifiers.push(fallback);
+    }
+
+    identifiers
+}
+
+fn replace_table_reference(markdown: String, table_id: &str, content: &str) -> String {
+    let escaped_id = regex::escape(table_id);
+    let replacement = format!("\n{content}\n");
+
+    let patterns = [
+        format!(
+            r#"!?\[[^\]]*\]\(\s*(?:\./)?{escaped_id}(?:#[^\s\)"']+)?(?:\s+(?:"[^"]*"|'[^']*'))?\s*\)"#
+        ),
+        format!(r"<\s*(?:\./)?{escaped_id}\s*>"),
+        format!(r"(?m)^\s*\[\s*(?:\./)?{escaped_id}\s*\]\s*$"),
+        format!(r"(?m)^\s*(?:\./)?{escaped_id}\s*$"),
+    ];
+
+    let mut updated = markdown;
+    for pattern in patterns {
+        if let Ok(regex) = Regex::new(&pattern) {
+            updated = regex.replace_all(&updated, replacement.as_str()).to_string();
+        }
+    }
+
+    updated
 }
 
 fn replace_image_placeholders(mut markdown: String, image_map: &HashMap<String, String>) -> String {
@@ -223,40 +268,53 @@ fn split_into_chapters(markdown: &str) -> Vec<(String, String)> {
         return Vec::new();
     }
 
+    let lines: Vec<&str> = markdown.lines().collect();
+    if lines.is_empty() {
+        return Vec::new();
+    }
+
+    let heading_candidates = collect_heading_candidates(&lines);
+    let mut boundaries = choose_split_boundaries(&heading_candidates);
+
+    if boundaries.is_empty() {
+        boundaries = collect_chapter_line_boundaries(&lines);
+    }
+
+    if boundaries.is_empty() {
+        return vec![(String::from("Document"), markdown.trim().to_owned())];
+    }
+
+    boundaries.sort_by_key(|boundary| boundary.start_line);
+    boundaries.dedup_by_key(|boundary| boundary.start_line);
+
     let mut chapters: Vec<(String, String)> = Vec::new();
     let mut current_title = String::from("Introduction");
-    let mut current_body = String::new();
-    let mut found_h1 = false;
+    let mut cursor = 0_usize;
 
-    for line in markdown.lines() {
-        if let Some(title) = line.strip_prefix("# ") {
-            if !current_body.trim().is_empty() {
-                chapters.push((current_title.clone(), current_body.trim().to_owned()));
-                current_body.clear();
+    for boundary in &boundaries {
+        if boundary.start_line > cursor {
+            let chunk = join_lines_trimmed(&lines[cursor..boundary.start_line]);
+            if !chunk.is_empty() {
+                chapters.push((current_title.clone(), chunk));
             }
-
-            current_title = title.trim().to_owned();
-            found_h1 = true;
         }
 
-        current_body.push_str(line);
-        current_body.push('\n');
+        current_title = boundary.title.clone();
+        cursor = boundary.start_line;
     }
 
-    if !current_body.trim().is_empty() {
-        chapters.push((current_title, current_body.trim().to_owned()));
+    if cursor < lines.len() {
+        let chunk = join_lines_trimmed(&lines[cursor..]);
+        if !chunk.is_empty() {
+            chapters.push((current_title, chunk));
+        }
     }
 
-    if !found_h1 && chapters.len() > 1 {
-        let joined = chapters
-            .into_iter()
-            .map(|(_, chunk)| chunk)
-            .collect::<Vec<_>>()
-            .join("\n\n");
-        return vec![(String::from("Document"), joined)];
+    if chapters.is_empty() {
+        return vec![(String::from("Document"), markdown.trim().to_owned())];
     }
 
-    if chapters.len() >= 2 {
+    if chapters.len() >= 3 {
         let trailing_chars = chapters
             .last()
             .map(|(_, chunk)| chunk.chars().count())
@@ -272,6 +330,153 @@ fn split_into_chapters(markdown: &str) -> Vec<(String, String)> {
     }
 
     chapters
+}
+
+#[derive(Debug, Clone)]
+struct ChapterBoundary {
+    start_line: usize,
+    level: u8,
+    title: String,
+}
+
+fn collect_heading_candidates(lines: &[&str]) -> Vec<ChapterBoundary> {
+    let mut boundaries = Vec::new();
+
+    let heading_re = Regex::new(r"^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$").ok();
+    let setext_re = Regex::new(r"^\s{0,3}(=+|-+)\s*$").ok();
+
+    let mut index = 0_usize;
+    while index < lines.len() {
+        let line = lines[index];
+
+        if let Some(regex) = &heading_re {
+            if let Some(captures) = regex.captures(line) {
+                let level = captures
+                    .get(1)
+                    .map(|value| value.as_str().len() as u8)
+                    .unwrap_or(1);
+                let title = captures
+                    .get(2)
+                    .map(|value| sanitize_heading_title(value.as_str()))
+                    .unwrap_or_default();
+                if !title.is_empty() {
+                    boundaries.push(ChapterBoundary {
+                        start_line: index,
+                        level,
+                        title,
+                    });
+                    index += 1;
+                    continue;
+                }
+            }
+        }
+
+        if index + 1 < lines.len() {
+            let current = lines[index].trim();
+            if !current.is_empty() {
+                if let Some(regex) = &setext_re {
+                    if let Some(captures) = regex.captures(lines[index + 1]) {
+                        let marker = captures
+                            .get(1)
+                            .map(|value| value.as_str())
+                            .unwrap_or("");
+                        let level = if marker.starts_with('=') { 1 } else { 2 };
+                        let title = sanitize_heading_title(current);
+                        if !title.is_empty() {
+                            boundaries.push(ChapterBoundary {
+                                start_line: index,
+                                level,
+                                title,
+                            });
+                            index += 2;
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
+
+        index += 1;
+    }
+
+    boundaries
+}
+
+fn choose_split_boundaries(candidates: &[ChapterBoundary]) -> Vec<ChapterBoundary> {
+    if candidates.is_empty() {
+        return Vec::new();
+    }
+
+    if candidates.iter().any(|boundary| boundary.level == 1) {
+        return candidates
+            .iter()
+            .filter(|boundary| boundary.level == 1)
+            .cloned()
+            .collect();
+    }
+
+    let level_two_count = candidates
+        .iter()
+        .filter(|boundary| boundary.level == 2)
+        .count();
+    if level_two_count >= 2 {
+        return candidates
+            .iter()
+            .filter(|boundary| boundary.level == 2)
+            .cloned()
+            .collect();
+    }
+
+    Vec::new()
+}
+
+fn collect_chapter_line_boundaries(lines: &[&str]) -> Vec<ChapterBoundary> {
+    let chapter_line_re = Regex::new(r"(?i)^\s*(chapter|part)\s+([0-9ivxlcdm]+)\b.*$").ok();
+    let Some(regex) = chapter_line_re else {
+        return Vec::new();
+    };
+
+    let mut boundaries = Vec::new();
+
+    for (index, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.chars().count() > 90 {
+            continue;
+        }
+
+        if !regex.is_match(trimmed) {
+            continue;
+        }
+
+        let prev_is_blank = index == 0 || lines[index - 1].trim().is_empty();
+        if !prev_is_blank {
+            continue;
+        }
+
+        boundaries.push(ChapterBoundary {
+            start_line: index,
+            level: 1,
+            title: sanitize_heading_title(trimmed),
+        });
+    }
+
+    if boundaries.len() >= 2 {
+        boundaries
+    } else {
+        Vec::new()
+    }
+}
+
+fn sanitize_heading_title(value: &str) -> String {
+    value
+        .trim()
+        .trim_matches('#')
+        .trim()
+        .to_owned()
+}
+
+fn join_lines_trimmed(lines: &[&str]) -> String {
+    lines.join("\n").trim().to_owned()
 }
 
 fn render_markdown_to_html(markdown: &str) -> String {
@@ -437,7 +642,9 @@ fn xml_escape(input: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::split_into_chapters;
+    use super::{replace_table_placeholders, split_into_chapters};
+    use crate::models::{OcrPage, OcrTable, TableFormat};
+    use serde_json::json;
 
     #[test]
     fn split_uses_h1_boundaries() {
@@ -446,5 +653,70 @@ mod tests {
         assert_eq!(chapters.len(), 2);
         assert_eq!(chapters[0].0, "One");
         assert_eq!(chapters[1].0, "Two");
+    }
+
+    #[test]
+    fn split_uses_h2_boundaries_when_no_h1_exists() {
+        let markdown = "## First\nA\n\n## Second\nB";
+        let chapters = split_into_chapters(markdown);
+        assert_eq!(chapters.len(), 2);
+        assert_eq!(chapters[0].0, "First");
+        assert_eq!(chapters[1].0, "Second");
+    }
+
+    #[test]
+    fn split_detects_setext_h1_boundaries() {
+        let markdown = "One\n===\nBody A\n\nTwo\n===\nBody B";
+        let chapters = split_into_chapters(markdown);
+        assert_eq!(chapters.len(), 2);
+        assert_eq!(chapters[0].0, "One");
+        assert_eq!(chapters[1].0, "Two");
+    }
+
+    #[test]
+    fn split_detects_chapter_style_lines() {
+        let markdown = "CHAPTER 1\nBody A\n\nCHAPTER 2\nBody B";
+        let chapters = split_into_chapters(markdown);
+        assert_eq!(chapters.len(), 2);
+        assert_eq!(chapters[0].0, "CHAPTER 1");
+        assert_eq!(chapters[1].0, "CHAPTER 2");
+    }
+
+    #[test]
+    fn table_replacement_handles_multiple_placeholder_shapes() {
+        let page = OcrPage {
+            index: 0,
+            markdown: String::new(),
+            images: Vec::new(),
+            tables: vec![OcrTable {
+                id: Some("table-main.html".to_string()),
+                html: Some("<table><tr><td>X</td></tr></table>".to_string()),
+                markdown: None,
+                content: None,
+                extra: [(
+                    "table_id".to_string(),
+                    json!("table-main.html"),
+                )]
+                .into_iter()
+                .collect(),
+            }],
+            hyperlinks: Vec::new(),
+            header: None,
+            footer: None,
+            dimensions: None,
+        };
+
+        let markdown = [
+            "[table-main.html](table-main.html)",
+            "[Table](./table-main.html \"Main table\")",
+            "<table-main.html>",
+            "table-main.html",
+        ]
+        .join("\n\n");
+
+        let replaced = replace_table_placeholders(markdown, &page, TableFormat::Html);
+        assert!(replaced.contains("<table><tr><td>X</td></tr></table>"));
+        assert!(!replaced.contains("table-main.html)"));
+        assert!(!replaced.contains("<table-main.html>"));
     }
 }
