@@ -92,3 +92,4 @@ Common options:
 - In the desktop app, API key entry and conversion toggles (`Include images`, `Run epubcheck`) live in `Settings...`.
 - The desktop app Settings dialog includes a shortcut link to the Mistral API key page.
 - After at least one successful conversion, the desktop app can open the selected target output folder.
+- During desktop conversions, backend stage progress events are emitted and shown in the progress modal (input, OCR, normalize, package, optional validate, complete).

@@ -161,3 +161,23 @@ pub struct ConvertSummary {
     pub cache_hit: bool,
     pub validation: Option<ValidationResult>,
 }
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ConvertStage {
+    ReadingInput,
+    Ocr,
+    Normalize,
+    PackageEpub,
+    Validate,
+    Complete,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConvertProgress {
+    pub stage: ConvertStage,
+    pub step: usize,
+    pub total_steps: usize,
+    pub message: String,
+    pub cache_hit: Option<bool>,
+}

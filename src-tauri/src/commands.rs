@@ -1,7 +1,10 @@
-use baegun_core::{convert_pdf_to_epub, ConvertConfig, TableFormat};
+use baegun_core::{convert_pdf_to_epub_with_progress, ConvertConfig, ConvertProgress, ConvertStage, TableFormat};
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::path::PathBuf;
+use tauri::Emitter;
+
+const CONVERT_PROGRESS_EVENT: &str = "baegun://convert-progress";
 
 #[derive(Debug, Deserialize)]
 pub struct ConvertRequest {
@@ -39,8 +42,19 @@ pub struct ConvertResponse {
     pub validation_errors: usize,
 }
 
+#[derive(Debug, Serialize)]
+pub struct ConvertProgressEvent {
+    pub input_path: String,
+    pub output_path: String,
+    pub stage: ConvertStage,
+    pub step: usize,
+    pub total_steps: usize,
+    pub message: String,
+    pub cache_hit: Option<bool>,
+}
+
 #[tauri::command]
-pub async fn convert_pdf(request: ConvertRequest) -> Result<ConvertResponse, String> {
+pub async fn convert_pdf(app: tauri::AppHandle, request: ConvertRequest) -> Result<ConvertResponse, String> {
     let input_path = PathBuf::from(request.input_path.clone());
     let output_path = request
         .output_path
@@ -90,7 +104,25 @@ pub async fn convert_pdf(request: ConvertRequest) -> Result<ConvertResponse, Str
         verbose: request.verbose.unwrap_or(false),
     };
 
-    let summary = tauri::async_runtime::spawn_blocking(move || convert_pdf_to_epub(&cfg))
+    let progress_input_path = cfg.input_pdf.to_string_lossy().to_string();
+    let progress_output_path = cfg.output_epub.to_string_lossy().to_string();
+    let app_handle = app.clone();
+
+    let summary = tauri::async_runtime::spawn_blocking(move || {
+        convert_pdf_to_epub_with_progress(&cfg, |progress: &ConvertProgress| {
+            let event = ConvertProgressEvent {
+                input_path: progress_input_path.clone(),
+                output_path: progress_output_path.clone(),
+                stage: progress.stage,
+                step: progress.step,
+                total_steps: progress.total_steps,
+                message: progress.message.clone(),
+                cache_hit: progress.cache_hit,
+            };
+
+            let _ = app_handle.emit(CONVERT_PROGRESS_EVENT, event);
+        })
+    })
         .await
         .map_err(|error| format!("Conversion task failed to join: {error}"))?
         .map_err(|error| error.message)?;

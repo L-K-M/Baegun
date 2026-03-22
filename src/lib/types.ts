@@ -42,6 +42,24 @@ export interface ConvertResponse {
   validation_errors: number;
 }
 
+export type ConvertStage =
+  | 'reading_input'
+  | 'ocr'
+  | 'normalize'
+  | 'package_epub'
+  | 'validate'
+  | 'complete';
+
+export interface ConvertProgressEvent {
+  input_path: string;
+  output_path: string;
+  stage: ConvertStage;
+  step: number;
+  total_steps: number;
+  message: string;
+  cache_hit?: boolean | null;
+}
+
 export interface NotificationItem {
   id: number;
   message: string;

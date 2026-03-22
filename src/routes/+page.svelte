@@ -17,7 +17,7 @@
     TitleBar
   } from '@lkmc/system7-ui';
 
-  import type { ConversionJob, ConvertRequest } from '$lib/types';
+  import type { ConversionJob, ConvertProgressEvent, ConvertRequest } from '$lib/types';
   import { TauriService } from '$lib/tauri';
   import { notifications } from '$lib/util/notifications';
   import { WindowManager } from '$lib/windowManager';
@@ -32,6 +32,14 @@
   ];
 
   const MISTRAL_API_KEYS_URL = 'https://console.mistral.ai/home?profile_dialog=api-keys';
+  const STAGE_LABELS: Record<ConvertProgressEvent['stage'], string> = {
+    reading_input: 'Input',
+    ocr: 'OCR',
+    normalize: 'Normalize',
+    package_epub: 'Package',
+    validate: 'Validate',
+    complete: 'Complete'
+  };
 
   let jobs: ConversionJob[] = [];
   let apiKey = '';
@@ -43,6 +51,8 @@
   let showProgressModal = false;
   let progressCurrent = 0;
   let progressTotal = 1;
+  let stageStep = 0;
+  let stageTotal = 0;
   let statusMessage = 'Idle';
   let errorMessage = '';
   let windowFocused = true;
@@ -50,6 +60,7 @@
   let isDropActive = false;
   let showSettingsDialog = false;
   let outputDirDropArmed = false;
+  let activeJobPath: string | null = null;
   let sortColumn: SortColumn = 'file';
   let sortDirection: 'asc' | 'desc' = 'asc';
 
@@ -77,9 +88,28 @@
     .filter(Boolean)
     .join('\n');
 
+  function handleConvertProgress(progress: ConvertProgressEvent) {
+    if (!converting || !activeJobPath) {
+      return;
+    }
+
+    if (progress.input_path !== activeJobPath) {
+      return;
+    }
+
+    const stageLabel = STAGE_LABELS[progress.stage] ?? 'Progress';
+    stageStep = progress.step;
+    stageTotal = progress.total_steps;
+    statusMessage = `${basename(progress.input_path)} · ${stageLabel}: ${progress.message}`;
+  }
+
   onMount(() => {
     const unlistenFocus = appWindow.onFocusChanged(({ payload }) => {
       windowFocused = payload;
+    });
+
+    const unlistenProgress = TauriService.listenConvertProgress((progress) => {
+      handleConvertProgress(progress);
     });
 
     const unlistenDrop = appWindow.onDragDropEvent((event: any) => {
@@ -117,6 +147,7 @@
     return () => {
       unlistenFocus.then((fn) => fn());
       unlistenDrop.then((fn) => fn());
+      unlistenProgress.then((fn) => fn());
     };
   });
 
@@ -274,9 +305,12 @@
     errorMessage = '';
     progressCurrent = 0;
     progressTotal = pending.length;
+    stageStep = 0;
+    stageTotal = 0;
     statusMessage = `Converting ${pending.length} file(s)...`;
 
     for (const job of pending) {
+      activeJobPath = job.path;
       updateJob(job.id, { status: 'running', message: undefined });
       statusMessage = `Converting ${basename(job.path)}...`;
 
@@ -309,6 +343,9 @@
       }
 
       progressCurrent += 1;
+      stageStep = 0;
+      stageTotal = 0;
+      activeJobPath = null;
     }
 
     const failures = jobs.filter((job) => job.status === 'error').length;
@@ -321,6 +358,9 @@
       notifications.add(`Converted ${successes} file(s).`, 'success');
     }
 
+    activeJobPath = null;
+    stageStep = 0;
+    stageTotal = 0;
     statusMessage = 'Idle';
     converting = false;
     showProgressModal = false;
@@ -546,6 +586,9 @@
         <h3>Converting Files</h3>
         <p>{statusMessage}</p>
         <ProgressBar value={progressCurrent} max={progressTotal} height={16} ariaLabel="Conversion progress" />
+        {#if stageTotal > 0}
+          <p class="modal-stage">Stage {stageStep} of {stageTotal}</p>
+        {/if}
         <p class="modal-meta">{progressCurrent} of {progressTotal} complete</p>
       </div>
     </ModalDialog>
@@ -755,6 +798,10 @@
   }
 
   .modal-meta {
+    color: #333;
+  }
+
+  .modal-stage {
     color: #333;
   }
 
