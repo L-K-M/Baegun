@@ -64,6 +64,12 @@ Build CLI binary:
 cargo build -p baegun-cli --release
 ```
 
+Build desktop bundles (DMG on macOS):
+
+```bash
+npm run tauri build
+```
+
 ## Quality Gates
 
 Automatic checks are wired into both commits and builds:
