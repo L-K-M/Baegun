@@ -6,10 +6,12 @@
     BalloonHelp,
     Button,
     Checkbox,
+    DataTable,
     DownloadIcon,
     ErrorBanner,
     ModalDialog,
     Notification,
+    PdfFileIcon,
     ProgressBar,
     TitleBar
   } from '@lkmc/system7-ui';
@@ -20,6 +22,13 @@
   import { WindowManager } from '$lib/windowManager';
 
   type SortColumn = 'file' | 'status' | 'output' | 'detail';
+
+  const tableColumns = [
+    { key: 'file', label: 'File', width: '34%', sortable: true },
+    { key: 'status', label: 'Status', width: '12%', sortable: true },
+    { key: 'output', label: 'Output', width: '32%', sortable: true },
+    { key: 'detail', label: 'Details', width: '22%', sortable: true }
+  ];
 
   let jobs: ConversionJob[] = [];
   let apiKey = '';
@@ -312,11 +321,10 @@
     sortDirection = 'asc';
   }
 
-  function getAriaSort(column: SortColumn): 'ascending' | 'descending' | 'none' {
-    if (sortColumn !== column) {
-      return 'none';
+  function handleTableSort(column: string) {
+    if (column === 'file' || column === 'status' || column === 'output' || column === 'detail') {
+      sortBy(column);
     }
-    return sortDirection === 'asc' ? 'ascending' : 'descending';
   }
 
   function compareJobs(
@@ -393,128 +401,71 @@
     <main class="app-content">
       <section class="file-panel">
         <div class="panel-header">
-          <h2>File List</h2>
           <div class="header-actions">
             <Button onclick={choosePdfFiles}>Add PDFs</Button>
             <Button onclick={clearFinished} disabled={doneCount === 0}>Clear Finished</Button>
           </div>
+          <Button onclick={openSettingsDialog}>Settings...</Button>
         </div>
 
         <div class="file-table">
-          <div class="table-header-container">
-            <table>
-              <thead>
-                <tr>
-                  <th class="col-file" aria-sort={getAriaSort('file')}>
-                    <button
-                      type="button"
-                      class="sort-button"
-                      class:is-active={sortColumn === 'file'}
-                      onclick={() => sortBy('file')}
-                    >
-                      File
-                    </button>
-                  </th>
-                  <th class="col-status" aria-sort={getAriaSort('status')}>
-                    <button
-                      type="button"
-                      class="sort-button"
-                      class:is-active={sortColumn === 'status'}
-                      onclick={() => sortBy('status')}
-                    >
-                      Status
-                    </button>
-                  </th>
-                  <th class="col-output" aria-sort={getAriaSort('output')}>
-                    <button
-                      type="button"
-                      class="sort-button"
-                      class:is-active={sortColumn === 'output'}
-                      onclick={() => sortBy('output')}
-                    >
-                      Output
-                    </button>
-                  </th>
-                  <th class="col-detail" aria-sort={getAriaSort('detail')}>
-                    <button
-                      type="button"
-                      class="sort-button"
-                      class:is-active={sortColumn === 'detail'}
-                      onclick={() => sortBy('detail')}
-                    >
-                      Details
-                    </button>
-                  </th>
-                </tr>
-              </thead>
-            </table>
-          </div>
-
-          <div class="table-body-container" class:drop-active={isDropActive}>
-            <table>
-              <tbody>
-                {#if jobs.length === 0}
-                  <tr>
-                    <td colspan="4" class="empty-row">
-                      Drop PDFs into this table, or click <strong>Add PDFs</strong>.
-                    </td>
-                  </tr>
-                {:else}
-                  {#each sortedJobs as job (job.id)}
-                    <tr>
-                      <td class="col-file">
-                        <div class="file-cell">
-                          <span class="file-icon" aria-hidden="true">📄</span>
-                          <span class="file-name" title={basename(job.path)}>{basename(job.path)}</span>
-                        </div>
-                      </td>
-                      <td class="col-status">
-                        <span class="status status-{job.status}">{job.status}</span>
-                      </td>
-                      <td class="col-output">{job.outputPath || '-'}</td>
-                      <td class="col-detail">{job.message || '-'}</td>
-                    </tr>
-                  {/each}
-                {/if}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            columns={tableColumns}
+            sortKey={sortColumn}
+            sortDirection={sortDirection}
+            onSort={handleTableSort}
+            empty={jobs.length === 0}
+            emptyText="Drop PDFs into this table, or click Add PDFs."
+            emptyColspan={4}
+            bodyClass={isDropActive ? 'drop-active' : ''}
+          >
+            {#each sortedJobs as job (job.id)}
+              <tr>
+                <td class="col-file">
+                  <div class="file-cell">
+                    <span class="file-icon" aria-hidden="true"><PdfFileIcon alt="" size={16} /></span>
+                    <span class="file-name" title={basename(job.path)}>{basename(job.path)}</span>
+                  </div>
+                </td>
+                <td class="col-status">
+                  <span class="status status-{job.status}">{job.status}</span>
+                </td>
+                <td class="col-output">{job.outputPath || '-'}</td>
+                <td class="col-detail">{job.message || '-'}</td>
+              </tr>
+            {/each}
+          </DataTable>
         </div>
       </section>
 
       <section class="settings-panel">
-        <div class="settings-header">
-          <h2>Settings</h2>
-          <Button onclick={openSettingsDialog}>Settings...</Button>
-        </div>
+        <h2>Settings</h2>
 
-        <label>
-          Output directory
-          <div
-            class="path-row output-drop-target"
-            class:drop-armed={outputDirDropArmed}
-            role="group"
-            aria-label="Output directory drop target"
-            ondragenter={handleOutputDirectoryDragEnter}
-            ondragleave={handleOutputDirectoryDragLeave}
-            ondragover={handleOutputDirectoryDragOver}
-          >
-            <input type="text" bind:value={outputDir} placeholder="/Users/name/Books" />
-            <Button onclick={chooseOutputDirectory}>Choose</Button>
+        <div class="settings-row">
+          <label class="output-dir-field">
+            Output directory
+            <div
+              class="path-row output-drop-target"
+              class:drop-armed={outputDirDropArmed}
+              role="group"
+              aria-label="Output directory drop target"
+              ondragenter={handleOutputDirectoryDragEnter}
+              ondragleave={handleOutputDirectoryDragLeave}
+              ondragover={handleOutputDirectoryDragOver}
+            >
+              <input type="text" bind:value={outputDir} placeholder="/Users/name/Books" />
+              <Button onclick={chooseOutputDirectory}>Choose</Button>
+            </div>
+          </label>
+
+          <div class="check-row">
+            <Checkbox
+              checked={includeImages}
+              label="Include images"
+              onchange={(checked: boolean) => (includeImages = checked)}
+            />
+            <Checkbox checked={validate} label="Run epubcheck" onchange={(checked: boolean) => (validate = checked)} />
           </div>
-        </label>
-
-        <div class="settings-hint">
-          API key: {missingApiKey ? 'Not configured' : 'Configured'} (open Settings to change)
-        </div>
-
-        <div class="check-row">
-          <Checkbox
-            checked={includeImages}
-            label="Include images"
-            onchange={(checked: boolean) => (includeImages = checked)}
-          />
-          <Checkbox checked={validate} label="Run epubcheck" onchange={(checked: boolean) => (validate = checked)} />
         </div>
 
         <div class="settings-footer">
@@ -642,17 +593,20 @@
     display: flex;
     gap: 16px;
     flex-wrap: wrap;
+    align-items: center;
   }
 
-  .settings-header {
+  .settings-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
+    gap: 12px;
+    flex-wrap: wrap;
   }
 
-  .settings-hint {
-    color: #444;
+  .output-dir-field {
+    flex: 1 1 420px;
+    min-width: 260px;
   }
 
   .settings-footer {
@@ -678,69 +632,14 @@
     min-height: 0;
     display: flex;
     flex-direction: column;
+    width: 100%;
     border: 1px solid #000;
   }
 
-  .table-header-container {
-    padding-right: 16px;
-    border-bottom: 1px solid #000;
-    background: #fff;
-  }
-
-  .table-body-container {
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
-    overflow-x: hidden;
-    border-top: 1px solid #000;
-    margin-top: 2px;
-    background: #fff;
-  }
-
-  .table-body-container.drop-active {
+  .file-table :global(.s7-data-table-body-container.drop-active) {
     background: #eef4ff;
     outline: 2px dashed #365ea8;
     outline-offset: -3px;
-  }
-
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    table-layout: fixed;
-  }
-
-  th,
-  td {
-    text-align: left;
-    padding: 5px 8px;
-    vertical-align: middle;
-    border-bottom: 1px solid #d9d9d9;
-  }
-
-  th {
-    letter-spacing: 0.04em;
-    color: #222;
-  }
-
-  .sort-button {
-    appearance: none;
-    border: none;
-    background: transparent;
-    padding: 0;
-    margin: 0;
-    color: inherit;
-    font: inherit;
-    cursor: pointer;
-    text-decoration: none;
-  }
-
-  .sort-button.is-active {
-    text-decoration: underline;
-    text-underline-offset: 2px;
-  }
-
-  tr:last-child td {
-    border-bottom: none;
   }
 
   .col-file {
@@ -806,13 +705,6 @@
     color: #b32020;
   }
 
-  .empty-row {
-    padding: 18px 10px;
-    text-align: center;
-    color: #666;
-    border-bottom: none;
-  }
-
   .progress-modal {
     padding: 12px;
     display: flex;
@@ -847,7 +739,7 @@
 
   @media (max-width: 900px) {
     .settings-footer,
-    .settings-header,
+    .settings-row,
     .panel-header,
     .header-actions,
     .check-row {
