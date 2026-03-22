@@ -1,0 +1,25 @@
+{
+  "model": "mistral-ocr-latest",
+  "pages": [
+    {
+      "index": 0,
+      "markdown": "# Fixture Book\n\nIntro paragraph from fixture.\n\n![Cover](img-cover.png)\n\n[table-main.html](table-main.html)",
+      "images": [
+        {
+          "id": "img-cover.png",
+          "image_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2V4x8AAAAASUVORK5CYII="
+        }
+      ],
+      "tables": [
+        {
+          "id": "table-main.html",
+          "html": "<table><tr><th>Col</th></tr><tr><td>1</td></tr></table>"
+        }
+      ]
+    },
+    {
+      "index": 1,
+      "markdown": "# Chapter Two\n\nSecond chapter paragraph."
+    }
+  ]
+}

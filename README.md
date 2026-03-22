@@ -64,9 +64,17 @@ cargo build -p baegun-cli --release
 baegun convert INPUT_PDF [OPTIONS]
 ```
 
+Batch folder conversion:
+
+```bash
+baegun convert-batch INPUT_DIR [OPTIONS]
+```
+
 Common options:
 
-- `-o, --output PATH`
+- `-o, --output PATH` (single-file `convert`)
+- `-o, --output-dir PATH` (`convert-batch`; defaults to `INPUT_DIR`)
+- `--recursive` (`convert-batch`; scans nested folders)
 - `--api-key TEXT` (or `MISTRAL_API_KEY`)
 - `--model TEXT` (default `mistral-ocr-latest`)
 - `--table-format html|markdown`
@@ -82,6 +90,8 @@ Common options:
 - `--fail-on-warn`
 - `--quiet`
 - `--verbose`
+
+`convert-batch` preserves relative folder structure for recursive runs (for example `input/nested/a.pdf` -> `output/nested/a.epub`).
 
 ## Notes
 

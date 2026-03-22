@@ -45,10 +45,13 @@ src-tauri/              # Tauri host and command bridge
 Main entry point:
 
 - `convert_pdf_to_epub(cfg: &ConvertConfig) -> Result<ConvertSummary>`
+- `convert_pdf_to_epub_with_progress(cfg, on_progress) -> Result<ConvertSummary>` for stage callbacks
 
 Important types:
 
 - `ConvertConfig`
+- `ConvertProgress`
+- `ConvertStage`
 - `TableFormat`
 - `ConvertSummary`
 - `ValidationResult`
@@ -68,11 +71,14 @@ Command:
 
 ```bash
 baegun convert INPUT_PDF [OPTIONS]
+baegun convert-batch INPUT_DIR [OPTIONS]
 ```
 
 Notable options:
 
 - `-o, --output`
+- `-o, --output-dir` (batch)
+- `--recursive` (batch)
 - `--api-key` (fallback `MISTRAL_API_KEY`)
 - `--model` (default `mistral-ocr-latest`)
 - `--table-format html|markdown`
@@ -105,6 +111,10 @@ Frontend: `src/routes/+page.svelte`.
 Backend command:
 
 - `convert_pdf(request: ConvertRequest) -> ConvertResponse`
+
+Progress event:
+
+- `baegun://convert-progress` with stage payload (`reading_input`, `ocr`, `normalize`, `package_epub`, optional `validate`, `complete`)
 
 The desktop app should remain a thin orchestrator over the shared `baegun-core` conversion logic.
 
@@ -177,8 +187,5 @@ If `epubcheck` is installed, test one end-to-end conversion with `--validate`.
 
 ## Backlog Ideas
 
-- Add progress events from backend to frontend (stream stage updates)
 - Better heading normalization and chapter merging heuristics
 - Better table placeholder recovery when OCR returns unusual shapes
-- Add batch folder conversion command to CLI
-- Add robust integration tests with fixed OCR fixtures in Rust
