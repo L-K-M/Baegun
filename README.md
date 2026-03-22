@@ -89,3 +89,6 @@ Common options:
 - OCR payloads are cached under `.baegun-cache` by default.
 - Use `--no-cache` for sensitive documents.
 - Uploaded OCR files are deleted by default unless `--keep-remote-file` is set.
+- In the desktop app, API key entry and conversion toggles (`Include images`, `Run epubcheck`) live in `Settings...`.
+- The desktop app Settings dialog includes a shortcut link to the Mistral API key page.
+- After at least one successful conversion, the desktop app can open the selected target output folder.

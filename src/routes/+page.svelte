@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { open } from '@tauri-apps/plugin-dialog';
+  import { openPath, openUrl } from '@tauri-apps/plugin-opener';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import {
     BalloonHelp,
@@ -29,6 +30,8 @@
     { key: 'output', label: 'Output', width: '32%', sortable: true },
     { key: 'detail', label: 'Details', width: '22%', sortable: true }
   ];
+
+  const MISTRAL_API_KEYS_URL = 'https://console.mistral.ai/home?profile_dialog=api-keys';
 
   let jobs: ConversionJob[] = [];
   let apiKey = '';
@@ -59,10 +62,17 @@
   $: missingApiKey = apiKey.trim().length === 0;
   $: missingOutputDir = outputDir.trim().length === 0;
   $: convertDisabled = converting || pendingCount === 0 || missingApiKey || missingOutputDir;
+  $: openTargetDisabled = doneCount === 0 || missingOutputDir;
   $: convertDisabledMessage = [
     missingApiKey ? 'Set the API key in Settings first.' : '',
     missingOutputDir ? 'Choose an output directory first.' : '',
     !missingApiKey && !missingOutputDir && pendingCount === 0 ? 'Add at least one PDF first.' : ''
+  ]
+    .filter(Boolean)
+    .join('\n');
+  $: openTargetDisabledMessage = [
+    missingOutputDir ? 'Choose an output directory first.' : '',
+    !missingOutputDir && doneCount === 0 ? 'Convert at least one PDF first.' : ''
   ]
     .filter(Boolean)
     .join('\n');
@@ -142,6 +152,26 @@
 
   function closeSettingsDialog() {
     showSettingsDialog = false;
+  }
+
+  async function openMistralApiKeysPage() {
+    try {
+      await openUrl(MISTRAL_API_KEYS_URL);
+    } catch {
+      notifications.add('Unable to open the Mistral API keys page.', 'error');
+    }
+  }
+
+  async function openTargetFolder() {
+    if (missingOutputDir || doneCount === 0) {
+      return;
+    }
+
+    try {
+      await openPath(outputDir.trim());
+    } catch {
+      notifications.add('Unable to open the target folder.', 'error');
+    }
   }
 
   async function setOutputDirectoryFromDrop(paths: string[]) {
@@ -439,8 +469,6 @@
       </section>
 
       <section class="settings-panel">
-        <h2>Settings</h2>
-
         <div class="settings-row">
           <label class="output-dir-field">
             Output directory
@@ -457,29 +485,27 @@
               <Button onclick={chooseOutputDirectory}>Choose</Button>
             </div>
           </label>
-
-          <div class="check-row">
-            <Checkbox
-              checked={includeImages}
-              label="Include images"
-              onchange={(checked: boolean) => (includeImages = checked)}
-            />
-            <Checkbox checked={validate} label="Run epubcheck" onchange={(checked: boolean) => (validate = checked)} />
-          </div>
         </div>
 
         <div class="settings-footer">
           <div class="queue-meta">Pending: {pendingCount} · Done: {doneCount}</div>
-          <BalloonHelp message={convertDisabled ? convertDisabledMessage : ''} position="top" delay={250}>
-            <span>
-              <Button variant="primary" onclick={convertAll} disabled={convertDisabled}>
-                <span class="convert-button-content">
-                  <DownloadIcon alt="Convert" size={14} />
-                  Convert All
-                </span>
-              </Button>
-            </span>
-          </BalloonHelp>
+          <div class="settings-footer-actions">
+            <BalloonHelp message={openTargetDisabled ? openTargetDisabledMessage : ''} position="top" delay={250}>
+              <span>
+                <Button onclick={openTargetFolder} disabled={openTargetDisabled}>Open Target Folder</Button>
+              </span>
+            </BalloonHelp>
+            <BalloonHelp message={convertDisabled ? convertDisabledMessage : ''} position="top" delay={250}>
+              <span>
+                <Button variant="primary" onclick={convertAll} disabled={convertDisabled}>
+                  <span class="convert-button-content">
+                    <DownloadIcon alt="Convert" size={14} />
+                    Convert All
+                  </span>
+                </Button>
+              </span>
+            </BalloonHelp>
+          </div>
         </div>
       </section>
     </main>
@@ -491,9 +517,22 @@
         <h3>Settings</h3>
         <label>
           Mistral API key
-          <input type="password" bind:value={apiKey} placeholder="mistral-xxxxxxxxxxxxxxxxxxxxxxxx" />
+          <input type="password" bind:value={apiKey} placeholder="ufuVDexxxxxxxxxxxxxxxxxxxxxxxx" />
         </label>
-        <p class="settings-dialog-hint">This key is used for OCR requests to Mistral.</p>
+        <div class="settings-dialog-meta">
+          <p class="settings-dialog-hint">This key is used for OCR requests to Mistral.</p>
+          <button type="button" class="settings-link" onclick={openMistralApiKeysPage}>
+            Open Mistral API keys ->
+          </button>
+        </div>
+        <div class="settings-dialog-toggle-row">
+          <Checkbox
+            checked={includeImages}
+            label="Include images"
+            onchange={(checked: boolean) => (includeImages = checked)}
+          />
+          <Checkbox checked={validate} label="Run epubcheck" onchange={(checked: boolean) => (validate = checked)} />
+        </div>
         <div class="settings-dialog-actions">
           <Button variant="primary" onclick={closeSettingsDialog}>Done</Button>
         </div>
@@ -558,7 +597,6 @@
     gap: 8px;
   }
 
-  h2,
   h3 {
     margin: 0;
     font-weight: 700;
@@ -589,13 +627,6 @@
     background: #eef4ff;
   }
 
-  .check-row {
-    display: flex;
-    gap: 16px;
-    flex-wrap: wrap;
-    align-items: center;
-  }
-
   .settings-row {
     display: flex;
     align-items: center;
@@ -612,6 +643,13 @@
   .settings-footer {
     display: flex;
     justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .settings-footer-actions {
+    display: flex;
     align-items: center;
     gap: 10px;
     flex-wrap: wrap;
@@ -732,6 +770,34 @@
     color: #444;
   }
 
+  .settings-dialog-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .settings-link {
+    align-self: flex-start;
+    border: none;
+    background: transparent;
+    padding: 0;
+    font: inherit;
+    color: #000;
+    text-decoration: underline;
+    cursor: pointer;
+  }
+
+  .settings-link:hover {
+    text-decoration: none;
+  }
+
+  .settings-dialog-toggle-row {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
   .settings-dialog-actions {
     display: flex;
     justify-content: flex-end;
@@ -739,10 +805,11 @@
 
   @media (max-width: 900px) {
     .settings-footer,
+    .settings-footer-actions,
     .settings-row,
     .panel-header,
     .header-actions,
-    .check-row {
+    .settings-dialog-toggle-row {
       flex-direction: column;
       align-items: flex-start;
     }
