@@ -32,6 +32,15 @@
   ];
 
   const MISTRAL_API_KEYS_URL = 'https://console.mistral.ai/home?profile_dialog=api-keys';
+  const SETTINGS_STORAGE_KEY = 'baegun.desktop.settings.v1';
+
+  type PersistedSettings = {
+    apiKey: string;
+    outputDir: string;
+    includeImages: boolean;
+    validate: boolean;
+  };
+
   const STAGE_LABELS: Record<ConvertProgressEvent['stage'], string> = {
     reading_input: 'Input',
     ocr: 'OCR',
@@ -61,6 +70,7 @@
   let showSettingsDialog = false;
   let outputDirDropArmed = false;
   let activeJobPath: string | null = null;
+  let settingsLoaded = false;
   let sortColumn: SortColumn = 'file';
   let sortDirection: 'asc' | 'desc' = 'asc';
 
@@ -88,6 +98,15 @@
     .filter(Boolean)
     .join('\n');
 
+  $: if (settingsLoaded) {
+    persistSettings({
+      apiKey,
+      outputDir,
+      includeImages,
+      validate
+    });
+  }
+
   function handleConvertProgress(progress: ConvertProgressEvent) {
     if (!converting || !activeJobPath) {
       return;
@@ -103,7 +122,43 @@
     statusMessage = `${basename(progress.input_path)} · ${stageLabel}: ${progress.message}`;
   }
 
+  function loadPersistedSettings() {
+    const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
+    if (!raw) {
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(raw) as Partial<PersistedSettings>;
+
+      if (typeof parsed.apiKey === 'string') {
+        apiKey = parsed.apiKey;
+      }
+
+      if (typeof parsed.outputDir === 'string') {
+        outputDir = parsed.outputDir;
+      }
+
+      if (typeof parsed.includeImages === 'boolean') {
+        includeImages = parsed.includeImages;
+      }
+
+      if (typeof parsed.validate === 'boolean') {
+        validate = parsed.validate;
+      }
+    } catch {
+      localStorage.removeItem(SETTINGS_STORAGE_KEY);
+    }
+  }
+
+  function persistSettings(settings: PersistedSettings) {
+    localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+  }
+
   onMount(() => {
+    loadPersistedSettings();
+    settingsLoaded = true;
+
     const unlistenFocus = appWindow.onFocusChanged(({ payload }) => {
       windowFocused = payload;
     });

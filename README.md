@@ -32,7 +32,7 @@ src-tauri/       Tauri host + Rust command bridge
 
 ## Install Dependencies
 
-Frontend dependencies include `system7-ui` from the sibling path `../system7-ui`.
+Frontend dependency: `system7-ui`.
 
 ```bash
 npm install
@@ -50,6 +50,12 @@ Tauri desktop app (dev mode):
 
 ```bash
 npm run tauri dev
+```
+
+Tauri desktop app (prod release):
+
+```bash
+npm run tauri build
 ```
 
 Build CLI binary:
