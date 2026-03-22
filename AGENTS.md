@@ -15,6 +15,44 @@ Build one shared conversion engine and expose it through two frontends:
 
 No Python runtime or Tk GUI remains in the main architecture.
 
+## Notes
+
+- PDF content is uploaded to Mistral OCR when cache is missed.
+- OCR payloads are cached under `.baegun-cache` by default.
+- Use `--no-cache` for sensitive documents.
+- Uploaded OCR files are deleted by default unless `--keep-remote-file` is set.
+- In the desktop app, API key entry and conversion toggles (`Include images`, `Run epubcheck`) live in `Settings...`.
+- The desktop app Settings dialog includes a shortcut link to the Mistral API key page.
+- After at least one successful conversion, the desktop app can open the selected target output folder.
+- During desktop conversions, backend stage progress events are emitted and shown in the progress modal (input, OCR, normalize, package, optional validate, complete).
+
+## Quality Gates
+
+Automatic checks are wired into both commits and builds:
+
+- `npm run build` runs `npm run verify` first, which runs:
+    - `npm run check`
+    - `npm run test` (`cargo test --workspace`)
+- Git pre-commit hook runs `npm run verify` automatically.
+
+If you commit from IntelliJ, keep **Run Git hooks** enabled in the commit dialog.
+
+## Architecture
+
+```text
+PDF -> Mistral OCR -> normalization -> chapter split -> XHTML/CSS -> EPUB package
+```
+
+Workspace layout:
+
+```text
+crates/
+  baegun-core/   shared conversion logic used by CLI and Tauri
+  baegun-cli/    `baegun` binary
+src/             SvelteKit frontend
+src-tauri/       Tauri host + Rust command bridge
+```
+
 ## Current Architecture
 
 ```text
