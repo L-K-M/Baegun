@@ -37,7 +37,7 @@ Alternatively, you can build and copy the binary manually:
 
 ```bash
 cargo build -p baegun-cli --release
-install -m 755 target/release/baegun /usr/local/bin/baegun
+sudo install -m 755 target/release/baegun /usr/local/bin/baegun
 ```
 
 ## CLI Usage
