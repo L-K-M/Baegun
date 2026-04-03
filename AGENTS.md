@@ -124,6 +124,7 @@ Notable options:
 - `--extract-header true|false`
 - `--extract-footer true|false`
 - `--include-images true|false`
+- `--comic`
 - `--cache-dir`
 - `--no-cache`
 - `--validate`

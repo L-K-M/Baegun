@@ -65,6 +65,7 @@ Common options:
 - `--extract-header true|false`
 - `--extract-footer true|false`
 - `--include-images true|false`
+- `--comic` (comic mode: one full-bleed image per page)
 - `--cache-dir PATH`
 - `--no-cache`
 - `--validate`
