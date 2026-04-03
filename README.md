@@ -56,25 +56,28 @@ baegun convert-batch INPUT_DIR [OPTIONS]
 
 Common options:
 
-- `-o, --output PATH` (single-file `convert`)
-- `-o, --output-dir PATH` (`convert-batch`; defaults to `INPUT_DIR`)
-- `--recursive` (`convert-batch`; scans nested folders)
-- `--api-key TEXT` (or `MISTRAL_API_KEY`)
-- `--model TEXT` (default `mistral-ocr-latest`)
-- `--table-format html|markdown`
-- `--extract-header true|false`
-- `--extract-footer true|false`
-- `--include-images true|false`
-- `--comic` (comic mode: one full-bleed image per page)
-- `--cache-dir PATH`
-- `--no-cache`
-- `--validate`
-- `--epubcheck-bin TEXT`
-- `--debug-dir PATH`
-- `--keep-remote-file`
-- `--fail-on-warn`
-- `--quiet`
-- `--verbose`
+| Option | Description |
+|---|---|
+| `-o, --output PATH` | Output EPUB path (single-file `convert`). Defaults to the input path with an `.epub` extension. |
+| `-o, --output-dir PATH` | Output directory (`convert-batch`). Defaults to `INPUT_DIR`. |
+| `--recursive` | Scan nested folders (`convert-batch` only). |
+| `--api-key TEXT` | Mistral API key. Falls back to the `MISTRAL_API_KEY` environment variable. |
+| `--model TEXT` | Mistral OCR model name. Default: `mistral-ocr-latest`. |
+| `--table-format html\|markdown` | Format for extracted tables in the EPUB. Default: `html`. |
+| `--extract-header true\|false` | Include page headers from OCR. Default: `true`. |
+| `--extract-footer true\|false` | Include page footers from OCR. Default: `true`. |
+| `--include-images true\|false` | Embed OCR images in the EPUB. Default: `true`. |
+| `--comic` | Comic mode: render each page as a single full-bleed image chapter. Forces image extraction on. |
+| `--cache-dir PATH` | Directory for caching OCR payloads. Default: `.baegun-cache`. |
+| `--no-cache` | Skip the OCR cache; always call the Mistral API. |
+| `--validate` | Run `epubcheck` on the output EPUB after packaging. |
+| `--epubcheck-bin TEXT` | Path or command name for the epubcheck executable. Default: `epubcheck`. |
+| `--debug-dir PATH` | Write intermediate pipeline artifacts (OCR JSON, markdown, XHTML) to this directory. |
+| `--keep-remote-file` | Do not delete the uploaded PDF from the Mistral files API after OCR. |
+| `--delete-source` | Delete the source PDF after a successful conversion. Skipped for files that fail. |
+| `--fail-on-warn` | Treat epubcheck warnings as errors (exit code 6). |
+| `--quiet` | Suppress all non-error output. |
+| `--verbose` | Print extra diagnostic information during conversion. |
 
 `convert-batch` preserves relative folder structure for recursive runs (for example `input/nested/a.pdf` -> `output/nested/a.epub`).
 

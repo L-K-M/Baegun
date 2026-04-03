@@ -131,6 +131,7 @@ Notable options:
 - `--epubcheck-bin`
 - `--debug-dir`
 - `--keep-remote-file`
+- `--delete-source`
 - `--fail-on-warn`
 - `--quiet`
 - `--verbose`

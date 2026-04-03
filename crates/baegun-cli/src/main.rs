@@ -108,6 +108,9 @@ struct CommonConvertArgs {
 
     #[arg(long = "comic", action = ArgAction::SetTrue, help = "Comic mode: render each page as a full-bleed image")]
     comic: bool,
+
+    #[arg(long = "delete-source", action = ArgAction::SetTrue, help = "Delete source PDF after successful conversion")]
+    delete_source: bool,
 }
 
 fn main() {
@@ -145,8 +148,14 @@ fn run_convert(args: ConvertArgs) -> Result<(), BaegunError> {
         .parse::<TableFormat>()
         .map_err(BaegunError::bad_args)?;
 
+    let delete_source = args.options.delete_source;
+    let input_path = args.input_pdf.clone();
     let cfg = build_config(args.input_pdf, output_epub, &args.options, api_key, table_format);
     run_single_conversion(&cfg)?;
+
+    if delete_source {
+        delete_source_file(&input_path, cfg.quiet)?;
+    }
 
     Ok(())
 }
@@ -233,6 +242,17 @@ fn run_convert_batch(args: ConvertBatchArgs) -> Result<(), BaegunError> {
         match run_single_conversion(&cfg) {
             Ok(_) => {
                 successes += 1;
+                if args.options.delete_source {
+                    if let Err(error) = delete_source_file(&input_pdf, args.options.quiet) {
+                        if !args.options.quiet {
+                            eprintln!(
+                                "Warning: converted '{}' but failed to delete source: {}",
+                                input_pdf.display(),
+                                error.message
+                            );
+                        }
+                    }
+                }
             }
             Err(error) => {
                 if !args.options.quiet {
@@ -295,6 +315,19 @@ fn resolve_api_key(arg_value: Option<String>) -> Option<String> {
     arg_value
         .or_else(|| env::var("MISTRAL_API_KEY").ok())
         .filter(|value| !value.trim().is_empty())
+}
+
+fn delete_source_file(path: &Path, quiet: bool) -> Result<(), BaegunError> {
+    fs::remove_file(path).map_err(|error| {
+        BaegunError::internal(format!(
+            "Failed to delete source file '{}': {error}",
+            path.display()
+        ))
+    })?;
+    if !quiet {
+        println!("Deleted source: {}", path.display());
+    }
+    Ok(())
 }
 
 fn run_single_conversion(cfg: &ConvertConfig) -> Result<ConvertSummary, BaegunError> {
