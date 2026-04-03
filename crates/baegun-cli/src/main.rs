@@ -275,6 +275,7 @@ fn build_config(
         extract_header: options.extract_header,
         extract_footer: options.extract_footer,
         include_images: options.include_images,
+        comic_mode: false,
         cache_dir: options.cache_dir.clone(),
         no_cache: options.no_cache,
         validate: options.validate,

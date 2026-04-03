@@ -158,6 +158,7 @@ fn fixture_config(input_pdf: PathBuf, output_epub: PathBuf, cache_dir: PathBuf) 
         extract_header: true,
         extract_footer: true,
         include_images: true,
+        comic_mode: false,
         cache_dir,
         no_cache: false,
         validate: false,
@@ -188,12 +189,14 @@ fn seed_cache_from_fixture(cfg: &ConvertConfig, pdf_bytes: &[u8]) {
 
 fn compute_cache_key(cfg: &ConvertConfig, pdf_bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
+    let include_images_for_ocr = cfg.include_images || cfg.comic_mode;
     hasher.update(pdf_bytes);
     hasher.update(cfg.model.as_bytes());
     hasher.update(cfg.table_format.as_str().as_bytes());
     hasher.update(if cfg.extract_header { b"1" } else { b"0" });
     hasher.update(if cfg.extract_footer { b"1" } else { b"0" });
-    hasher.update(if cfg.include_images { b"1" } else { b"0" });
+    hasher.update(if include_images_for_ocr { b"1" } else { b"0" });
+    hasher.update(if cfg.comic_mode { b"1" } else { b"0" });
     hasher.update(env!("CARGO_PKG_VERSION").as_bytes());
     format!("{:x}", hasher.finalize())
 }

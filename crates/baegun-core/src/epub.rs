@@ -170,6 +170,22 @@ img {
   height: auto;
 }
 
+body.comic-page {
+  margin: 0;
+  padding: 0;
+}
+
+.comic-frame {
+  margin: 0;
+  padding: 0;
+}
+
+.comic-frame img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
 table {
   border-collapse: collapse;
   width: 100%;

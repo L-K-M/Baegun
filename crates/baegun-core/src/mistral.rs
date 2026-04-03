@@ -79,6 +79,7 @@ fn perform_ocr_with_retries(
     cfg: &ConvertConfig,
     file_id: &str,
 ) -> Result<MistralOcrResponse> {
+    let include_image_base64 = cfg.include_images || cfg.comic_mode;
     let request_payload = json!({
         "model": cfg.model,
         "document": {
@@ -88,7 +89,7 @@ fn perform_ocr_with_retries(
         "table_format": cfg.table_format.as_str(),
         "extract_header": cfg.extract_header,
         "extract_footer": cfg.extract_footer,
-        "include_image_base64": cfg.include_images,
+        "include_image_base64": include_image_base64,
     });
 
     let mut attempt = 0_u32;

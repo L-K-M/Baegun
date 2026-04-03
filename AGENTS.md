@@ -21,10 +21,11 @@ No Python runtime or Tk GUI remains in the main architecture.
 - OCR payloads are cached under `.baegun-cache` by default.
 - Use `--no-cache` for sensitive documents.
 - Uploaded OCR files are deleted by default unless `--keep-remote-file` is set.
-- In the desktop app, API key entry and conversion toggles (`Include images`, `Run epubcheck`) live in `Settings...`.
+- In the desktop app, API key entry and conversion toggles (`Include images`, `Comic mode`, `Run epubcheck`) live in `Settings...`.
 - The desktop app Settings dialog includes a shortcut link to the Mistral API key page.
 - After at least one successful conversion, the desktop app can open the selected target output folder.
 - During desktop conversions, backend stage progress events are emitted and shown in the progress modal (input, OCR, normalize, package, optional validate, complete).
+- The desktop queue supports per-file removal, and the progress modal includes a cancel button that stops after the current in-flight file.
 
 ## Quality Gates
 
@@ -191,6 +192,7 @@ Request fields used:
 - `include_image_base64`
 
 OCR payloads are expected to include `pages[]` with markdown + optional images/tables.
+Image payloads can arrive as raw base64 or `data:*;base64,...` data URIs and should be decoded in either shape.
 
 ## EPUB Packaging Rules
 
@@ -227,3 +229,12 @@ If `epubcheck` is installed, test one end-to-end conversion with `--validate`.
 
 - Tune chapter merge/split thresholds with a broader OCR fixture corpus
 - Add additional table-placeholder fixture variants from real OCR edge cases
+
+## Dependency release-age policy
+
+- npm installs in this repo are protected by `min-release-age=3` in `.npmrc`.
+- If `npm install` fails because a package is too new, do not repeatedly retry.
+- Use this order:
+  1. wait until the package ages past 3 days,
+  2. pin to an older known-good version,
+  3. temporarily bypass with `npm install --min-release-age=0` for urgent fixes, then restore the policy.

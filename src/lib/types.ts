@@ -21,6 +21,7 @@ export interface ConvertRequest {
   extract_header?: boolean;
   extract_footer?: boolean;
   include_images?: boolean;
+  comic_mode?: boolean;
   cache_dir?: string;
   no_cache?: boolean;
   validate?: boolean;

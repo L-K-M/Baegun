@@ -14,6 +14,7 @@
     Notification,
     PdfFileIcon,
     ProgressBar,
+    TrashIcon,
     TitleBar
   } from '@lkmc/system7-ui';
 
@@ -25,10 +26,11 @@
   type SortColumn = 'file' | 'status' | 'output' | 'detail';
 
   const tableColumns = [
-    { key: 'file', label: 'File', width: '34%', sortable: true },
+    { key: 'file', label: 'File', width: '32%', sortable: true },
     { key: 'status', label: 'Status', width: '12%', sortable: true },
-    { key: 'output', label: 'Output', width: '32%', sortable: true },
-    { key: 'detail', label: 'Details', width: '22%', sortable: true }
+    { key: 'output', label: 'Output', width: '28%', sortable: true },
+    { key: 'detail', label: 'Details', width: '22%', sortable: true },
+    { key: 'remove', label: '', width: '6%', align: 'right' as const, sortable: false }
   ];
 
   const MISTRAL_API_KEYS_URL = 'https://console.mistral.ai/home?profile_dialog=api-keys';
@@ -38,6 +40,7 @@
     apiKey: string;
     outputDir: string;
     includeImages: boolean;
+    comicMode: boolean;
     validate: boolean;
   };
 
@@ -54,6 +57,7 @@
   let apiKey = '';
   let outputDir = '';
   let includeImages = true;
+  let comicMode = false;
   let validate = false;
 
   let converting = false;
@@ -70,6 +74,7 @@
   let showSettingsDialog = false;
   let outputDirDropArmed = false;
   let activeJobPath: string | null = null;
+  let cancelRequested = false;
   let settingsLoaded = false;
   let sortColumn: SortColumn = 'file';
   let sortDirection: 'asc' | 'desc' = 'asc';
@@ -103,6 +108,7 @@
       apiKey,
       outputDir,
       includeImages,
+      comicMode,
       validate
     });
   }
@@ -119,7 +125,8 @@
     const stageLabel = STAGE_LABELS[progress.stage] ?? 'Progress';
     stageStep = progress.step;
     stageTotal = progress.total_steps;
-    statusMessage = `${basename(progress.input_path)} · ${stageLabel}: ${progress.message}`;
+    const cancelSuffix = cancelRequested ? ' (cancel requested)' : '';
+    statusMessage = `${basename(progress.input_path)} · ${stageLabel}: ${progress.message}${cancelSuffix}`;
   }
 
   function loadPersistedSettings() {
@@ -141,6 +148,10 @@
 
       if (typeof parsed.includeImages === 'boolean') {
         includeImages = parsed.includeImages;
+      }
+
+      if (typeof parsed.comicMode === 'boolean') {
+        comicMode = parsed.comicMode;
       }
 
       if (typeof parsed.validate === 'boolean') {
@@ -330,8 +341,36 @@
     }
   }
 
+  function removeJob(id: string) {
+    if (converting) {
+      return;
+    }
+
+    jobs = jobs.filter((job) => job.id !== id);
+  }
+
   function clearFinished() {
     jobs = jobs.filter((job) => job.status === 'pending' || job.status === 'running');
+  }
+
+  function handleComicModeChange(checked: boolean) {
+    comicMode = checked;
+    if (checked) {
+      includeImages = true;
+    }
+  }
+
+  function requestCancelConversion() {
+    if (!converting || cancelRequested) {
+      return;
+    }
+
+    cancelRequested = true;
+    if (activeJobPath) {
+      statusMessage = `Cancel requested. Finishing ${basename(activeJobPath)}...`;
+    } else {
+      statusMessage = 'Cancel requested.';
+    }
   }
 
   async function convertAll() {
@@ -356,6 +395,7 @@
     }
 
     converting = true;
+    cancelRequested = false;
     showProgressModal = true;
     errorMessage = '';
     progressCurrent = 0;
@@ -365,6 +405,10 @@
     statusMessage = `Converting ${pending.length} file(s)...`;
 
     for (const job of pending) {
+      if (cancelRequested) {
+        break;
+      }
+
       activeJobPath = job.path;
       updateJob(job.id, { status: 'running', message: undefined });
       statusMessage = `Converting ${basename(job.path)}...`;
@@ -376,7 +420,8 @@
         output_path: outputPath,
         api_key: apiKey,
         language: 'en',
-        include_images: includeImages,
+        include_images: includeImages || comicMode,
+        comic_mode: comicMode,
         validate,
         quiet: true,
         verbose: false
@@ -403,10 +448,22 @@
       activeJobPath = null;
     }
 
+    const canceled = cancelRequested;
+    const pendingRemaining = jobs.filter((job) => job.status === 'pending').length;
     const failures = jobs.filter((job) => job.status === 'error').length;
     const successes = jobs.filter((job) => job.status === 'done').length;
 
-    if (failures > 0) {
+    if (canceled) {
+      if (failures > 0) {
+        errorMessage = `${failures} conversion(s) failed before cancel.`;
+        notifications.add(
+          `Canceled with ${successes} succeeded, ${failures} failed, ${pendingRemaining} pending.`,
+          'error'
+        );
+      } else {
+        notifications.add(`Canceled with ${successes} succeeded and ${pendingRemaining} pending.`, 'info');
+      }
+    } else if (failures > 0) {
       errorMessage = `${failures} conversion(s) failed.`;
       notifications.add(`${successes} succeeded, ${failures} failed.`, 'error');
     } else {
@@ -418,6 +475,7 @@
     stageTotal = 0;
     statusMessage = 'Idle';
     converting = false;
+    cancelRequested = false;
     showProgressModal = false;
   }
 
@@ -541,7 +599,7 @@
             onSort={handleTableSort}
             empty={jobs.length === 0}
             emptyText="Drop PDFs into this table, or click Add PDFs."
-            emptyColspan={4}
+            emptyColspan={5}
             bodyClass={isDropActive ? 'drop-active' : ''}
           >
             {#each sortedJobs as job (job.id)}
@@ -557,6 +615,16 @@
                 </td>
                 <td class="col-output">{job.outputPath || '-'}</td>
                 <td class="col-detail">{job.message || '-'}</td>
+                <td class="col-remove">
+                  <Button
+                    variant="icon"
+                    title={`Remove ${basename(job.path)} from queue`}
+                    onclick={() => removeJob(job.id)}
+                    disabled={converting}
+                  >
+                    <TrashIcon alt={`Remove ${basename(job.path)}`} size={16} />
+                  </Button>
+                </td>
               </tr>
             {/each}
           </DataTable>
@@ -623,9 +691,11 @@
         <div class="settings-dialog-toggle-row">
           <Checkbox
             checked={includeImages}
+            disabled={comicMode}
             label="Include images"
             onchange={(checked: boolean) => (includeImages = checked)}
           />
+          <Checkbox checked={comicMode} label="Comic mode" onchange={handleComicModeChange} />
           <Checkbox checked={validate} label="Run epubcheck" onchange={(checked: boolean) => (validate = checked)} />
         </div>
         <div class="settings-dialog-actions">
@@ -645,6 +715,11 @@
           <p class="modal-stage">Stage {stageStep} of {stageTotal}</p>
         {/if}
         <p class="modal-meta">{progressCurrent} of {progressTotal} complete</p>
+        <div class="progress-modal-actions">
+          <Button onclick={requestCancelConversion} disabled={cancelRequested}>
+            {cancelRequested ? 'Canceling...' : 'Cancel'}
+          </Button>
+        </div>
       </div>
     </ModalDialog>
   {/if}
@@ -779,7 +854,7 @@
   }
 
   .col-file {
-    width: 34%;
+    width: 32%;
   }
 
   .col-status {
@@ -787,11 +862,16 @@
   }
 
   .col-output {
-    width: 32%;
+    width: 28%;
   }
 
   .col-detail {
     width: 22%;
+  }
+
+  .col-remove {
+    width: 6%;
+    text-align: right;
   }
 
   .file-cell {
@@ -850,6 +930,11 @@
 
   .progress-modal p {
     margin: 0;
+  }
+
+  .progress-modal-actions {
+    display: flex;
+    justify-content: flex-end;
   }
 
   .modal-meta {
@@ -923,6 +1008,10 @@
     .col-status,
     .col-detail {
       width: 18%;
+    }
+
+    .col-remove {
+      width: 10%;
     }
   }
 </style>

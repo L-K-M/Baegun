@@ -20,6 +20,7 @@ pub struct ConvertRequest {
     pub extract_header: Option<bool>,
     pub extract_footer: Option<bool>,
     pub include_images: Option<bool>,
+    pub comic_mode: Option<bool>,
     pub cache_dir: Option<String>,
     pub no_cache: Option<bool>,
     pub validate: Option<bool>,
@@ -73,6 +74,8 @@ pub async fn convert_pdf(app: tauri::AppHandle, request: ConvertRequest) -> Resu
         .parse::<TableFormat>()
         .map_err(|error| format!("Invalid table format: {error}"))?;
 
+    let comic_mode = request.comic_mode.unwrap_or(false);
+
     let cfg = ConvertConfig {
         input_pdf: input_path,
         output_epub: output_path,
@@ -87,7 +90,8 @@ pub async fn convert_pdf(app: tauri::AppHandle, request: ConvertRequest) -> Resu
         table_format,
         extract_header: request.extract_header.unwrap_or(true),
         extract_footer: request.extract_footer.unwrap_or(true),
-        include_images: request.include_images.unwrap_or(true),
+        include_images: request.include_images.unwrap_or(true) || comic_mode,
+        comic_mode,
         cache_dir: request
             .cache_dir
             .map(PathBuf::from)

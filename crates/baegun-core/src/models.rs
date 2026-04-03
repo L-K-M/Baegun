@@ -54,6 +54,7 @@ pub struct ConvertConfig {
     pub extract_header: bool,
     pub extract_footer: bool,
     pub include_images: bool,
+    pub comic_mode: bool,
     pub cache_dir: PathBuf,
     pub no_cache: bool,
     pub validate: bool,

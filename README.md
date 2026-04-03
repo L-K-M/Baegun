@@ -7,6 +7,8 @@ Baegun is a Rust PDF to EPUB converter with two frontends that share the same co
 
 The converter uses Mistral OCR to extract structured markdown, images, and tables, then builds chapterized EPUB3 output.
 
+OCR image payloads are accepted as either raw base64 strings or `data:*;base64,...` data URIs.
+
 ## Prerequisites
 
 - Rust toolchain (`cargo`, `rustc`)
@@ -74,6 +76,12 @@ Common options:
 - `--verbose`
 
 `convert-batch` preserves relative folder structure for recursive runs (for example `input/nested/a.pdf` -> `output/nested/a.epub`).
+
+## Desktop App Notes
+
+- Open `Settings...` to set your Mistral API key and conversion toggles (`Include images`, `Comic mode`, `Run epubcheck`).
+- `Comic mode` emits one image-first EPUB chapter per source page using OCR image payloads.
+- The queue supports per-file removal, and the conversion progress modal supports canceling the remaining queue after the current file finishes.
 
 # Development
 
