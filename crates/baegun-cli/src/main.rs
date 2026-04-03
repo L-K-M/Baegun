@@ -219,6 +219,11 @@ fn run_convert_batch(args: ConvertBatchArgs) -> Result<(), BaegunError> {
 
     let mut successes = 0_usize;
     let mut failures: Vec<(PathBuf, BaegunError)> = Vec::new();
+    let mut total_pages = 0_usize;
+    let mut total_chapters = 0_usize;
+    let mut total_images = 0_usize;
+    let mut cache_hits = 0_usize;
+    let mut sources_deleted = 0_usize;
 
     for input_pdf in pdf_files {
         let output_epub = derive_batch_output_path(&input_pdf, &args.input_dir, &output_dir);
@@ -240,8 +245,14 @@ fn run_convert_batch(args: ConvertBatchArgs) -> Result<(), BaegunError> {
         );
 
         match run_single_conversion(&cfg) {
-            Ok(_) => {
+            Ok(summary) => {
                 successes += 1;
+                total_pages += summary.pages_processed;
+                total_chapters += summary.chapters;
+                total_images += summary.images;
+                if summary.cache_hit {
+                    cache_hits += 1;
+                }
                 if args.options.delete_source {
                     if let Err(error) = delete_source_file(&input_pdf, args.options.quiet) {
                         if !args.options.quiet {
@@ -251,6 +262,8 @@ fn run_convert_batch(args: ConvertBatchArgs) -> Result<(), BaegunError> {
                                 error.message
                             );
                         }
+                    } else {
+                        sources_deleted += 1;
                     }
                 }
             }
@@ -264,11 +277,24 @@ fn run_convert_batch(args: ConvertBatchArgs) -> Result<(), BaegunError> {
     }
 
     if !args.options.quiet {
-        println!(
-            "Batch complete: {} succeeded, {} failed.",
-            successes,
-            failures.len()
-        );
+        println!();
+        println!("Batch complete: {} succeeded, {} failed.", successes, failures.len());
+        if successes > 0 {
+            println!(
+                "Totals: {} pages, {} chapters, {} images, {}/{} cache hits.",
+                total_pages, total_chapters, total_images, cache_hits, successes
+            );
+        }
+        if sources_deleted > 0 {
+            println!("Deleted {} source file(s).", sources_deleted);
+        }
+        if !failures.is_empty() {
+            println!();
+            println!("Failures:");
+            for (path, error) in &failures {
+                println!("  {}: {}", path.display(), error.message);
+            }
+        }
     }
 
     if failures.is_empty() {
@@ -423,22 +449,11 @@ fn build_batch_failure_error(successes: usize, failures: &[(PathBuf, BaegunError
         .map(|(_, error)| error.kind)
         .unwrap_or(ErrorKind::Internal);
 
-    let mut message = format!(
+    let message = format!(
         "Batch conversion completed with {} failure(s) and {} success(es).",
         failures.len(),
         successes
     );
-
-    for (path, error) in failures.iter().take(5) {
-        message.push_str(&format!("\n- {}: {}", path.display(), error.message));
-    }
-
-    if failures.len() > 5 {
-        message.push_str(&format!(
-            "\n- ... and {} more failure(s).",
-            failures.len() - 5
-        ));
-    }
 
     BaegunError::new(kind, message)
 }
