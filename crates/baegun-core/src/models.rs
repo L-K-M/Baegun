@@ -76,6 +76,17 @@ pub struct MistralOcrResponse {
     pub usage_info: Option<Value>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct BookMetadata {
+    pub title: Option<String>,
+    pub author: Option<String>,
+    pub language: Option<String>,
+    pub publisher: Option<String>,
+    pub description: Option<String>,
+    #[serde(default)]
+    pub subjects: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OcrPage {
     pub index: usize,
@@ -124,9 +135,12 @@ pub struct RenderedBook {
     pub author: Option<String>,
     pub language: String,
     pub publisher: Option<String>,
+    pub description: Option<String>,
+    pub subjects: Vec<String>,
     pub source_hash: String,
     pub chapters: Vec<RenderedChapter>,
     pub images: Vec<ImageAsset>,
+    pub cover_image: Option<String>,
 }
 
 #[derive(Debug, Clone)]

@@ -6,13 +6,13 @@ use std::path::PathBuf;
 
 pub fn compute_cache_key(cfg: &ConvertConfig, pdf_bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
-    let include_images_for_ocr = cfg.include_images || cfg.comic_mode;
     hasher.update(pdf_bytes);
     hasher.update(cfg.model.as_bytes());
     hasher.update(cfg.table_format.as_str().as_bytes());
     hasher.update(if cfg.extract_header { b"1" } else { b"0" });
     hasher.update(if cfg.extract_footer { b"1" } else { b"0" });
-    hasher.update(if include_images_for_ocr { b"1" } else { b"0" });
+    // Image payloads are always requested so the first page image can become the EPUB cover.
+    hasher.update(b"1");
     hasher.update(if cfg.comic_mode { b"1" } else { b"0" });
     hasher.update(env!("CARGO_PKG_VERSION").as_bytes());
     format!("{:x}", hasher.finalize())
@@ -45,7 +45,11 @@ pub fn load_cached_ocr(cfg: &ConvertConfig, cache_key: &str) -> Result<Option<Mi
     }
 }
 
-pub fn store_cached_ocr(cfg: &ConvertConfig, cache_key: &str, payload: &MistralOcrResponse) -> Result<()> {
+pub fn store_cached_ocr(
+    cfg: &ConvertConfig,
+    cache_key: &str,
+    payload: &MistralOcrResponse,
+) -> Result<()> {
     if cfg.no_cache {
         return Ok(());
     }
@@ -58,8 +62,9 @@ pub fn store_cached_ocr(cfg: &ConvertConfig, cache_key: &str, payload: &MistralO
     })?;
 
     let path = cache_file_path(cfg, cache_key);
-    let json = serde_json::to_string_pretty(payload)
-        .map_err(|error| BaegunError::internal(format!("Failed serializing OCR payload: {error}")))?;
+    let json = serde_json::to_string_pretty(payload).map_err(|error| {
+        BaegunError::internal(format!("Failed serializing OCR payload: {error}"))
+    })?;
 
     fs::write(&path, json).map_err(|error| {
         BaegunError::internal(format!(

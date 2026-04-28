@@ -26,6 +26,9 @@ No Python runtime or Tk GUI remains in the main architecture.
 - After at least one successful conversion, the desktop app can open the selected target output folder.
 - During desktop conversions, backend stage progress events are emitted and shown in the progress modal (input, OCR, normalize, package, optional validate, complete).
 - The desktop queue supports per-file removal, and the progress modal includes a cancel button that stops after the current in-flight file.
+- EPUB output marks the first extracted image from the first PDF page as the cover image.
+- EPUB metadata is resolved from explicit config, PDF metadata, and best-effort Mistral LLM generation from OCR content when needed.
+- Desktop validation resolves `epubcheck` from `PATH`, bundled resources, common Homebrew/MacPorts locations, or `EPUBCHECK_BIN`.
 
 ## Quality Gates
 
@@ -99,6 +102,7 @@ Important types:
 Key modules:
 
 - `mistral.rs`: file upload + OCR request + retry + cleanup
+- `metadata.rs`: PDF metadata extraction + metadata merge + optional LLM enrichment
 - `cache.rs`: `.baegun-cache` SHA256-keyed OCR payload cache
 - `normalize.rs`: placeholder replacement, chapterization, XHTML rendering
 - `epub.rs`: EPUB packaging (zip + `content.opf` + `nav.xhtml`)
@@ -195,6 +199,8 @@ Request fields used:
 
 OCR payloads are expected to include `pages[]` with markdown + optional images/tables.
 Image payloads can arrive as raw base64 or `data:*;base64,...` data URIs and should be decoded in either shape.
+OCR image payloads are requested for all conversions so the first page image can be used as the EPUB cover, even when body image embedding is disabled.
+When title/author/description/subjects are missing, cached OCR text can be sent to Mistral chat completions for best-effort EPUB metadata generation. Explicit config values take precedence.
 
 ## EPUB Packaging Rules
 
@@ -205,8 +211,11 @@ Generated archive includes:
 - `OEBPS/content.opf`
 - `OEBPS/nav.xhtml`
 - `OEBPS/styles/book.css`
+- `OEBPS/text/cover.xhtml` when a cover image is available
 - `OEBPS/text/chapter-*.xhtml`
 - `OEBPS/images/*`
+
+When a first-page image is available, mark its manifest item with `properties="cover-image"`.
 
 ## Operational Notes
 

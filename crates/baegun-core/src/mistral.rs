@@ -1,5 +1,5 @@
 use crate::errors::{BaegunError, Result};
-use crate::models::{ConvertConfig, MistralOcrResponse};
+use crate::models::{BookMetadata, ConvertConfig, MistralOcrResponse};
 use reqwest::blocking::{multipart, Client};
 use reqwest::StatusCode;
 use serde::Deserialize;
@@ -9,10 +9,27 @@ use std::time::Duration;
 
 const FILES_API_URL: &str = "https://api.mistral.ai/v1/files";
 const OCR_API_URL: &str = "https://api.mistral.ai/v1/ocr";
+const CHAT_API_URL: &str = "https://api.mistral.ai/v1/chat/completions";
+const METADATA_MODEL: &str = "mistral-small-latest";
 
 #[derive(Debug, Deserialize)]
 struct UploadFileResponse {
     id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChatCompletionResponse {
+    choices: Vec<ChatChoice>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChatChoice {
+    message: ChatMessage,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChatMessage {
+    content: String,
 }
 
 pub fn run_mistral_ocr(
@@ -20,10 +37,9 @@ pub fn run_mistral_ocr(
     pdf_bytes: &[u8],
     source_filename: &str,
 ) -> Result<MistralOcrResponse> {
-    let api_key = cfg
-        .api_key
-        .as_deref()
-        .ok_or_else(|| BaegunError::bad_args("Missing API key. Pass --api-key or set MISTRAL_API_KEY."))?;
+    let api_key = cfg.api_key.as_deref().ok_or_else(|| {
+        BaegunError::bad_args("Missing API key. Pass --api-key or set MISTRAL_API_KEY.")
+    })?;
 
     let client = Client::builder()
         .timeout(Duration::from_secs(300))
@@ -40,7 +56,79 @@ pub fn run_mistral_ocr(
     ocr_result
 }
 
-fn upload_pdf(client: &Client, api_key: &str, pdf_bytes: &[u8], source_filename: &str) -> Result<String> {
+pub(crate) fn generate_book_metadata(
+    cfg: &ConvertConfig,
+    ocr_payload: &MistralOcrResponse,
+) -> Result<BookMetadata> {
+    let api_key = cfg
+        .api_key
+        .as_deref()
+        .ok_or_else(|| BaegunError::bad_args("Missing API key for metadata generation."))?;
+    let content_sample = ocr_metadata_sample(ocr_payload);
+    if content_sample.is_empty() {
+        return Ok(BookMetadata::default());
+    }
+
+    let client = Client::builder()
+        .timeout(Duration::from_secs(60))
+        .build()
+        .map_err(|error| BaegunError::api(format!("Failed creating HTTP client: {error}")))?;
+
+    let request_payload = json!({
+        "model": METADATA_MODEL,
+        "temperature": 0,
+        "max_tokens": 500,
+        "response_format": { "type": "json_object" },
+        "messages": [
+            {
+                "role": "system",
+                "content": "Extract or infer EPUB metadata from OCR text. Return only compact JSON with keys title, author, publisher, language, description, subjects. Use null for unknown scalar fields. Use a short BCP-47 language code when evident. subjects must be an array of up to 8 concise subject tags. Do not invent a human author when there is no evidence."
+            },
+            {
+                "role": "user",
+                "content": content_sample
+            }
+        ]
+    });
+
+    let response = client
+        .post(CHAT_API_URL)
+        .bearer_auth(api_key)
+        .json(&request_payload)
+        .send()
+        .map_err(|error| {
+            BaegunError::api(format!(
+                "Failed generating EPUB metadata with Mistral: {error}"
+            ))
+        })?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().unwrap_or_default();
+        return Err(BaegunError::api(format!(
+            "Mistral metadata generation failed ({status}): {}",
+            decode_api_error_message(&body)
+        )));
+    }
+
+    let completion = response.json::<ChatCompletionResponse>().map_err(|error| {
+        BaegunError::api(format!("Failed parsing Mistral metadata response: {error}"))
+    })?;
+    let content = completion
+        .choices
+        .first()
+        .map(|choice| choice.message.content.as_str())
+        .unwrap_or_default();
+
+    parse_generated_metadata(content)
+}
+
+fn upload_pdf(
+    client: &Client,
+    api_key: &str,
+    pdf_bytes: &[u8],
+    source_filename: &str,
+) -> Result<String> {
     let part = multipart::Part::bytes(pdf_bytes.to_vec())
         .file_name(source_filename.to_owned())
         .mime_str("application/pdf")
@@ -66,9 +154,11 @@ fn upload_pdf(client: &Client, api_key: &str, pdf_bytes: &[u8], source_filename:
         )));
     }
 
-    let upload = response
-        .json::<UploadFileResponse>()
-        .map_err(|error| BaegunError::api(format!("Failed parsing Mistral file upload response: {error}")))?;
+    let upload = response.json::<UploadFileResponse>().map_err(|error| {
+        BaegunError::api(format!(
+            "Failed parsing Mistral file upload response: {error}"
+        ))
+    })?;
 
     Ok(upload.id)
 }
@@ -79,7 +169,7 @@ fn perform_ocr_with_retries(
     cfg: &ConvertConfig,
     file_id: &str,
 ) -> Result<MistralOcrResponse> {
-    let include_image_base64 = cfg.include_images || cfg.comic_mode;
+    // Always request image payloads so the first page image can become the EPUB cover.
     let request_payload = json!({
         "model": cfg.model,
         "document": {
@@ -89,7 +179,7 @@ fn perform_ocr_with_retries(
         "table_format": cfg.table_format.as_str(),
         "extract_header": cfg.extract_header,
         "extract_footer": cfg.extract_footer,
-        "include_image_base64": include_image_base64,
+        "include_image_base64": true,
     });
 
     let mut attempt = 0_u32;
@@ -114,9 +204,7 @@ fn perform_ocr_with_retries(
                 })?;
 
                 if payload.pages.is_empty() {
-                    return Err(BaegunError::ocr_schema(
-                        "OCR response contains no pages."
-                    ));
+                    return Err(BaegunError::ocr_schema("OCR response contains no pages."));
                 }
 
                 return Ok(payload);
@@ -167,6 +255,110 @@ fn delete_remote_file(client: &Client, api_key: &str, file_id: &str) -> Result<(
     Ok(())
 }
 
+fn ocr_metadata_sample(ocr_payload: &MistralOcrResponse) -> String {
+    let mut pages = ocr_payload.pages.iter().collect::<Vec<_>>();
+    pages.sort_by_key(|page| page.index);
+
+    let mut sample = String::new();
+    for page in pages.into_iter().take(8) {
+        let markdown = page.markdown.trim();
+        if markdown.is_empty() {
+            continue;
+        }
+
+        sample.push_str(&format!("Page {}:\n{}\n\n", page.index + 1, markdown));
+        if sample.len() >= 12_000 {
+            break;
+        }
+    }
+
+    truncate_chars(sample.trim(), 12_000)
+}
+
+fn parse_generated_metadata(content: &str) -> Result<BookMetadata> {
+    let Some(json_text) = extract_json_object(content) else {
+        return Ok(BookMetadata::default());
+    };
+    let value = serde_json::from_str::<Value>(json_text).map_err(|error| {
+        BaegunError::api(format!("Failed parsing generated metadata JSON: {error}"))
+    })?;
+
+    Ok(BookMetadata {
+        title: metadata_string(&value, "title"),
+        author: metadata_string(&value, "author"),
+        language: metadata_string(&value, "language"),
+        publisher: metadata_string(&value, "publisher"),
+        description: metadata_string(&value, "description"),
+        subjects: metadata_strings(&value, "subjects")
+            .into_iter()
+            .take(8)
+            .collect(),
+    })
+}
+
+fn extract_json_object(content: &str) -> Option<&str> {
+    let start = content.find('{')?;
+    let end = content.rfind('}')?;
+    (start <= end).then_some(&content[start..=end])
+}
+
+fn metadata_string(value: &Value, key: &str) -> Option<String> {
+    match value.get(key)? {
+        Value::String(raw) => clean_metadata_value(raw),
+        Value::Array(items) => {
+            let joined = items
+                .iter()
+                .filter_map(Value::as_str)
+                .filter_map(clean_metadata_value)
+                .collect::<Vec<_>>()
+                .join(", ");
+            clean_metadata_value(&joined)
+        }
+        _ => None,
+    }
+}
+
+fn metadata_strings(value: &Value, key: &str) -> Vec<String> {
+    match value.get(key) {
+        Some(Value::Array(items)) => items
+            .iter()
+            .filter_map(Value::as_str)
+            .filter_map(clean_metadata_value)
+            .collect(),
+        Some(Value::String(raw)) => raw
+            .split([',', ';', '\n'])
+            .filter_map(clean_metadata_value)
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn clean_metadata_value(value: &str) -> Option<String> {
+    let cleaned = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    if cleaned.is_empty()
+        || cleaned.eq_ignore_ascii_case("unknown")
+        || cleaned.eq_ignore_ascii_case("null")
+    {
+        None
+    } else {
+        Some(cleaned)
+    }
+}
+
+fn truncate_chars(value: &str, max_len: usize) -> String {
+    if value.len() <= max_len {
+        return value.to_owned();
+    }
+
+    let end = value
+        .char_indices()
+        .map(|(index, _)| index)
+        .take_while(|index| *index <= max_len)
+        .last()
+        .unwrap_or(0);
+    value[..end].to_owned()
+}
+
 fn is_retryable_status(status: StatusCode) -> bool {
     status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
 }
@@ -192,4 +384,24 @@ fn decode_api_error_message(body: &str) -> String {
     }
 
     body.trim().to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_generated_metadata;
+
+    #[test]
+    fn parses_generated_metadata_json() {
+        let metadata = parse_generated_metadata(
+            r#"```json
+{"title":"Generated Title","author":"Generated Author","language":"en","publisher":null,"description":"Short description","subjects":["fiction","history"]}
+```"#,
+        )
+        .expect("generated metadata should parse");
+
+        assert_eq!(metadata.title.as_deref(), Some("Generated Title"));
+        assert_eq!(metadata.author.as_deref(), Some("Generated Author"));
+        assert_eq!(metadata.description.as_deref(), Some("Short description"));
+        assert_eq!(metadata.subjects, vec!["fiction", "history"]);
+    }
 }

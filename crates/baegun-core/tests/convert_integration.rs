@@ -73,10 +73,17 @@ fn converts_cached_ocr_fixture_to_epub() {
     assert!(entry_names.contains(&"META-INF/container.xml".to_string()));
     assert!(entry_names.contains(&"OEBPS/content.opf".to_string()));
     assert!(entry_names.contains(&"OEBPS/nav.xhtml".to_string()));
+    assert!(entry_names.contains(&"OEBPS/text/cover.xhtml".to_string()));
     assert!(entry_names.contains(&"OEBPS/styles/book.css".to_string()));
-    assert!(entry_names.iter().any(|name| name.starts_with("OEBPS/text/chapter-001-")));
-    assert!(entry_names.iter().any(|name| name.starts_with("OEBPS/text/chapter-002-")));
-    assert!(entry_names.iter().any(|name| name.starts_with("OEBPS/images/")));
+    assert!(entry_names
+        .iter()
+        .any(|name| name.starts_with("OEBPS/text/chapter-001-")));
+    assert!(entry_names
+        .iter()
+        .any(|name| name.starts_with("OEBPS/text/chapter-002-")));
+    assert!(entry_names
+        .iter()
+        .any(|name| name.starts_with("OEBPS/images/")));
 
     let chapter_one_path = entry_names
         .iter()
@@ -87,6 +94,83 @@ fn converts_cached_ocr_fixture_to_epub() {
     assert!(chapter_one.contains("<table>"));
     assert!(chapter_one.contains("../images/"));
     assert!(!chapter_one.contains("[table-main.html](table-main.html)"));
+
+    let content_opf = read_zip_entry(&mut archive, "OEBPS/content.opf");
+    assert!(content_opf.contains("properties=\"cover-image\""));
+    assert!(content_opf.contains("href=\"images/img-cover.png\""));
+
+    let cover = read_zip_entry(&mut archive, "OEBPS/text/cover.xhtml");
+    assert!(cover.contains("../images/img-cover.png"));
+}
+
+#[test]
+fn disabled_body_images_still_uses_first_page_image_as_cover() {
+    let workspace = TestWorkspace::new("cover-without-body-images");
+    let input_pdf = workspace.path("input/book.pdf");
+    let output_epub = workspace.path("output/book.epub");
+    let cache_dir = workspace.path("cache");
+
+    if let Some(parent) = input_pdf.parent() {
+        fs::create_dir_all(parent).expect("input directory should be created");
+    }
+
+    let pdf_bytes = b"%PDF-1.4\n% Baegun cover fixture\n";
+    fs::write(&input_pdf, pdf_bytes).expect("input PDF fixture should be written");
+
+    let mut cfg = fixture_config(input_pdf.clone(), output_epub, cache_dir);
+    cfg.include_images = false;
+    seed_cache_from_fixture(&cfg, pdf_bytes);
+
+    let summary = convert_pdf_to_epub(&cfg).expect("cached fixture conversion should succeed");
+    assert_eq!(summary.images, 1);
+
+    let mut archive = ZipArchive::new(File::open(&summary.output_path).expect("epub should exist"))
+        .expect("epub archive should be readable");
+    let chapter_one_path = zip_entry_names(&mut archive)
+        .into_iter()
+        .find(|name| name.starts_with("OEBPS/text/chapter-001-"))
+        .expect("first chapter entry should exist");
+    let chapter_one = read_zip_entry(&mut archive, &chapter_one_path);
+    assert!(!chapter_one.contains("../images/"));
+
+    let content_opf = read_zip_entry(&mut archive, "OEBPS/content.opf");
+    assert!(content_opf.contains("properties=\"cover-image\""));
+    assert!(content_opf.contains("href=\"images/img-cover.png\""));
+}
+
+#[test]
+fn pdf_info_metadata_populates_epub_opf() {
+    let workspace = TestWorkspace::new("pdf-info-metadata");
+    let input_pdf = workspace.path("input/book.pdf");
+    let output_epub = workspace.path("output/book.epub");
+    let cache_dir = workspace.path("cache");
+
+    if let Some(parent) = input_pdf.parent() {
+        fs::create_dir_all(parent).expect("input directory should be created");
+    }
+
+    let pdf_bytes = br#"%PDF-1.4
+1 0 obj
+<< /Title (Metadata Title) /Author (Metadata Author) /Publisher (Baegun Press) /Subject (Metadata description) /Keywords (conversion, epub) /Lang (fr) >>
+endobj
+"#;
+    fs::write(&input_pdf, pdf_bytes).expect("input PDF fixture should be written");
+
+    let cfg = fixture_config(input_pdf.clone(), output_epub, cache_dir);
+    seed_cache_from_fixture(&cfg, pdf_bytes);
+
+    let summary = convert_pdf_to_epub(&cfg).expect("cached fixture conversion should succeed");
+    let mut archive = ZipArchive::new(File::open(&summary.output_path).expect("epub should exist"))
+        .expect("epub archive should be readable");
+    let content_opf = read_zip_entry(&mut archive, "OEBPS/content.opf");
+
+    assert!(content_opf.contains("<dc:title>Metadata Title</dc:title>"));
+    assert!(content_opf.contains("<dc:creator>Metadata Author</dc:creator>"));
+    assert!(content_opf.contains("<dc:language>fr</dc:language>"));
+    assert!(content_opf.contains("<dc:publisher>Baegun Press</dc:publisher>"));
+    assert!(content_opf.contains("<dc:description>Metadata description</dc:description>"));
+    assert!(content_opf.contains("<dc:subject>conversion</dc:subject>"));
+    assert!(content_opf.contains("<dc:subject>epub</dc:subject>"));
 }
 
 #[test]
@@ -176,26 +260,33 @@ fn seed_cache_from_fixture(cfg: &ConvertConfig, pdf_bytes: &[u8]) {
         .join("tests")
         .join("fixtures")
         .join("ocr_payload_sample.json");
-    let fixture_json = fs::read_to_string(&fixture_path)
-        .unwrap_or_else(|error| panic!("failed reading fixture '{}': {error}", fixture_path.display()));
+    let fixture_json = fs::read_to_string(&fixture_path).unwrap_or_else(|error| {
+        panic!(
+            "failed reading fixture '{}': {error}",
+            fixture_path.display()
+        )
+    });
 
     let cache_key = compute_cache_key(cfg, pdf_bytes);
     let cache_path = cfg.cache_dir.join(format!("{cache_key}.ocr.json"));
 
     fs::create_dir_all(&cfg.cache_dir).expect("cache directory should be created");
-    fs::write(&cache_path, fixture_json)
-        .unwrap_or_else(|error| panic!("failed writing cache fixture '{}': {error}", cache_path.display()));
+    fs::write(&cache_path, fixture_json).unwrap_or_else(|error| {
+        panic!(
+            "failed writing cache fixture '{}': {error}",
+            cache_path.display()
+        )
+    });
 }
 
 fn compute_cache_key(cfg: &ConvertConfig, pdf_bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
-    let include_images_for_ocr = cfg.include_images || cfg.comic_mode;
     hasher.update(pdf_bytes);
     hasher.update(cfg.model.as_bytes());
     hasher.update(cfg.table_format.as_str().as_bytes());
     hasher.update(if cfg.extract_header { b"1" } else { b"0" });
     hasher.update(if cfg.extract_footer { b"1" } else { b"0" });
-    hasher.update(if include_images_for_ocr { b"1" } else { b"0" });
+    hasher.update(b"1");
     hasher.update(if cfg.comic_mode { b"1" } else { b"0" });
     hasher.update(env!("CARGO_PKG_VERSION").as_bytes());
     format!("{:x}", hasher.finalize())

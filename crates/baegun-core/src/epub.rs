@@ -52,6 +52,13 @@ pub fn write_epub(book: &RenderedBook, output_path: &Path) -> Result<()> {
     zip.write_all(build_content_opf(book).as_bytes())
         .map_err(io_error("OEBPS/content.opf"))?;
 
+    if let Some(cover_image) = &book.cover_image {
+        zip.start_file("OEBPS/text/cover.xhtml", deflated)
+            .map_err(zip_error("OEBPS/text/cover.xhtml"))?;
+        zip.write_all(build_cover_xhtml(book, cover_image).as_bytes())
+            .map_err(io_error("OEBPS/text/cover.xhtml"))?;
+    }
+
     for chapter in &book.chapters {
         let zip_path = format!("OEBPS/text/{}", chapter.file_name);
         zip.start_file(&zip_path, deflated)
@@ -67,8 +74,9 @@ pub fn write_epub(book: &RenderedBook, output_path: &Path) -> Result<()> {
         zip.write_all(&image.bytes).map_err(io_error(&zip_path))?;
     }
 
-    zip.finish()
-        .map_err(|error| BaegunError::epub(format!("Failed finalizing EPUB zip stream: {error}")))?;
+    zip.finish().map_err(|error| {
+        BaegunError::epub(format!("Failed finalizing EPUB zip stream: {error}"))
+    })?;
 
     Ok(())
 }
@@ -100,27 +108,49 @@ fn build_nav_xhtml(book: &RenderedBook) -> String {
     )
 }
 
+fn build_cover_xhtml(book: &RenderedBook, cover_image: &str) -> String {
+    let escaped_title = xml_escape(&book.title);
+    let escaped_lang = xml_escape(&book.language);
+    let escaped_src = xml_escape(&format!("../images/{cover_image}"));
+
+    format!(
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<!DOCTYPE html>\n<html xmlns=\"http://www.w3.org/1999/xhtml\" xml:lang=\"{escaped_lang}\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <title>{escaped_title}</title>\n    <link rel=\"stylesheet\" type=\"text/css\" href=\"../styles/book.css\" />\n  </head>\n  <body class=\"cover-page\">\n    <section class=\"cover-frame\">\n      <img src=\"{escaped_src}\" alt=\"{escaped_title}\" />\n    </section>\n  </body>\n</html>\n"
+    )
+}
+
 fn build_content_opf(book: &RenderedBook) -> String {
     let mut manifest = String::from(
         "    <item id=\"nav\" href=\"nav.xhtml\" media-type=\"application/xhtml+xml\" properties=\"nav\"/>\n    <item id=\"css\" href=\"styles/book.css\" media-type=\"text/css\"/>\n",
     );
     let mut spine = String::new();
 
+    if book.cover_image.is_some() {
+        manifest.push_str(
+            "    <item id=\"cover\" href=\"text/cover.xhtml\" media-type=\"application/xhtml+xml\"/>\n",
+        );
+        spine.push_str("    <itemref idref=\"cover\"/>\n");
+    }
+
     for chapter in &book.chapters {
         manifest.push_str(&format!(
             "    <item id=\"{}\" href=\"text/{}\" media-type=\"application/xhtml+xml\"/>\n",
-            chapter.id,
-            chapter.file_name
+            chapter.id, chapter.file_name
         ));
         spine.push_str(&format!("    <itemref idref=\"{}\"/>\n", chapter.id));
     }
 
     for (index, image) in book.images.iter().enumerate() {
+        let properties = if book.cover_image.as_deref() == Some(image.file_name.as_str()) {
+            " properties=\"cover-image\""
+        } else {
+            ""
+        };
         manifest.push_str(&format!(
-            "    <item id=\"img-{:04}\" href=\"images/{}\" media-type=\"{}\"/>\n",
+            "    <item id=\"img-{:04}\" href=\"images/{}\" media-type=\"{}\"{}/>\n",
             index + 1,
             image.file_name,
-            image.media_type
+            image.media_type,
+            properties
         ));
     }
 
@@ -132,16 +162,38 @@ fn build_content_opf(book: &RenderedBook) -> String {
     let publisher_meta = book
         .publisher
         .as_ref()
-        .map(|publisher| format!("    <dc:publisher>{}</dc:publisher>\n", xml_escape(publisher)))
+        .map(|publisher| {
+            format!(
+                "    <dc:publisher>{}</dc:publisher>\n",
+                xml_escape(publisher)
+            )
+        })
         .unwrap_or_default();
+    let description_meta = book
+        .description
+        .as_ref()
+        .map(|description| {
+            format!(
+                "    <dc:description>{}</dc:description>\n",
+                xml_escape(description)
+            )
+        })
+        .unwrap_or_default();
+    let subject_meta = book
+        .subjects
+        .iter()
+        .map(|subject| format!("    <dc:subject>{}</dc:subject>\n", xml_escape(subject)))
+        .collect::<String>();
 
     format!(
-        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<package xmlns=\"http://www.idpf.org/2007/opf\" unique-identifier=\"bookid\" version=\"3.0\">\n  <metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\">\n    <dc:identifier id=\"bookid\">urn:sha256:{}</dc:identifier>\n    <dc:title>{}</dc:title>\n{}    <dc:language>{}</dc:language>\n{}  </metadata>\n  <manifest>\n{}  </manifest>\n  <spine>\n{}  </spine>\n</package>\n",
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<package xmlns=\"http://www.idpf.org/2007/opf\" unique-identifier=\"bookid\" version=\"3.0\">\n  <metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\">\n    <dc:identifier id=\"bookid\">urn:sha256:{}</dc:identifier>\n    <dc:title>{}</dc:title>\n{}    <dc:language>{}</dc:language>\n{}{}{}  </metadata>\n  <manifest>\n{}  </manifest>\n  <spine>\n{}  </spine>\n</package>\n",
         xml_escape(&book.source_hash),
         xml_escape(&book.title),
         author_meta,
         xml_escape(&book.language),
         publisher_meta,
+        description_meta,
+        subject_meta,
         manifest,
         spine,
     )
@@ -167,6 +219,23 @@ h3 { font-size: 1.25rem; }
 
 img {
   max-width: 100%;
+  height: auto;
+}
+
+body.cover-page {
+  margin: 0;
+  padding: 0;
+  text-align: center;
+}
+
+.cover-frame {
+  margin: 0;
+  padding: 0;
+}
+
+.cover-frame img {
+  display: block;
+  width: 100%;
   height: auto;
 }
 

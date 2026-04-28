@@ -1,6 +1,7 @@
 mod cache;
 mod epub;
 mod errors;
+mod metadata;
 mod mistral;
 mod models;
 mod normalize;
@@ -8,9 +9,8 @@ mod validate;
 
 pub use errors::{BaegunError, ErrorKind, Result};
 pub use models::{
-    ConvertConfig, ConvertProgress, ConvertStage, ConvertSummary, MistralOcrResponse, OcrImage,
-    OcrPage, OcrTable, TableFormat,
-    ValidationResult,
+    BookMetadata, ConvertConfig, ConvertProgress, ConvertStage, ConvertSummary, MistralOcrResponse,
+    OcrImage, OcrPage, OcrTable, TableFormat, ValidationResult,
 };
 
 use sha2::{Digest, Sha256};
@@ -20,7 +20,10 @@ pub fn convert_pdf_to_epub(cfg: &ConvertConfig) -> Result<ConvertSummary> {
     convert_pdf_to_epub_with_progress(cfg, |_| {})
 }
 
-pub fn convert_pdf_to_epub_with_progress<F>(cfg: &ConvertConfig, mut on_progress: F) -> Result<ConvertSummary>
+pub fn convert_pdf_to_epub_with_progress<F>(
+    cfg: &ConvertConfig,
+    mut on_progress: F,
+) -> Result<ConvertSummary>
 where
     F: FnMut(&ConvertProgress),
 {
@@ -126,12 +129,18 @@ where
         ConvertStage::Normalize,
         3,
         total_steps,
-        "Normalizing OCR output and chapterizing content",
+        "Resolving metadata, normalizing OCR output, and chapterizing content",
         Some(cache_hit),
     );
 
-    let rendered =
-        normalize::normalize_to_rendered_book(&ocr_payload, cfg, &cfg.input_pdf, &source_hash)?;
+    let book_metadata = metadata::resolve_book_metadata(cfg, &pdf_bytes, &ocr_payload);
+    let rendered = normalize::normalize_to_rendered_book(
+        &ocr_payload,
+        cfg,
+        &book_metadata,
+        &cfg.input_pdf,
+        &source_hash,
+    )?;
 
     if let Some(debug_dir) = &cfg.debug_dir {
         let chapter_dump = rendered

@@ -2,8 +2,9 @@ use baegun_core::{
     convert_pdf_to_epub_with_progress, ConvertConfig, ConvertProgress, ConvertStage, TableFormat,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::{Emitter, Manager};
 
 const CONVERT_PROGRESS_EVENT: &str = "baegun://convert-progress";
@@ -89,6 +90,8 @@ pub async fn convert_pdf(
             .map_err(|error| format!("Failed resolving app cache directory: {error}"))?,
     };
 
+    let epubcheck_bin = resolve_epubcheck_bin(&app, request.epubcheck_bin.as_deref());
+
     let cfg = ConvertConfig {
         input_pdf: input_path,
         output_epub: output_path,
@@ -108,9 +111,7 @@ pub async fn convert_pdf(
         cache_dir,
         no_cache: request.no_cache.unwrap_or(false),
         validate: request.validate.unwrap_or(false),
-        epubcheck_bin: request
-            .epubcheck_bin
-            .unwrap_or_else(|| String::from("epubcheck")),
+        epubcheck_bin,
         keep_remote_file: request.keep_remote_file.unwrap_or(false),
         fail_on_warn: request.fail_on_warn.unwrap_or(false),
         debug_dir: request.debug_dir.map(PathBuf::from),
@@ -161,4 +162,107 @@ pub async fn convert_pdf(
 #[tauri::command]
 pub async fn is_directory(path: String) -> Result<bool, String> {
     Ok(PathBuf::from(path).is_dir())
+}
+
+fn resolve_epubcheck_bin(app: &tauri::AppHandle, requested: Option<&str>) -> String {
+    let command = requested
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .or_else(|| {
+            env::var("EPUBCHECK_BIN")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+        })
+        .unwrap_or_else(|| String::from("epubcheck"));
+
+    if path_like_command(&command) {
+        return command;
+    }
+
+    find_command(app, &command)
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or(command)
+}
+
+fn find_command(app: &tauri::AppHandle, command: &str) -> Option<PathBuf> {
+    let mut dirs = Vec::new();
+    let mut seen = HashSet::new();
+
+    if let Some(path_var) = env::var_os("PATH") {
+        for dir in env::split_paths(&path_var) {
+            push_unique_dir(&mut dirs, &mut seen, dir);
+        }
+    }
+
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        push_unique_dir(&mut dirs, &mut seen, resource_dir.join("bin"));
+        push_unique_dir(&mut dirs, &mut seen, resource_dir);
+    }
+
+    for dir in common_executable_dirs() {
+        push_unique_dir(&mut dirs, &mut seen, dir);
+    }
+
+    let names = command_names(command);
+    for dir in dirs {
+        for name in &names {
+            let candidate = dir.join(name);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+
+    None
+}
+
+fn path_like_command(command: &str) -> bool {
+    let path = Path::new(command);
+    path.is_absolute() || path.components().count() > 1
+}
+
+fn push_unique_dir(dirs: &mut Vec<PathBuf>, seen: &mut HashSet<PathBuf>, dir: PathBuf) {
+    if seen.insert(dir.clone()) {
+        dirs.push(dir);
+    }
+}
+
+fn common_executable_dirs() -> Vec<PathBuf> {
+    [
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+        "/opt/local/bin",
+        "/usr/bin",
+        "/bin",
+    ]
+    .into_iter()
+    .map(PathBuf::from)
+    .collect()
+}
+
+fn command_names(command: &str) -> Vec<String> {
+    let path = Path::new(command);
+    if path.extension().is_some() {
+        return vec![command.to_owned()];
+    }
+
+    #[cfg(not(windows))]
+    {
+        vec![command.to_owned()]
+    }
+
+    #[cfg(windows)]
+    {
+        let mut names = vec![command.to_owned()];
+        let extensions =
+            env::var("PATHEXT").unwrap_or_else(|_| String::from(".COM;.EXE;.BAT;.CMD"));
+        for extension in extensions.split(';') {
+            let extension = extension.trim();
+            if !extension.is_empty() {
+                names.push(format!("{command}{extension}"));
+            }
+        }
+        names
+    }
 }

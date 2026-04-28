@@ -1,6 +1,6 @@
 use crate::errors::{BaegunError, Result};
 use crate::models::{
-    ConvertConfig, ImageAsset, MistralOcrResponse, OcrPage, OcrTable, RenderedBook,
+    BookMetadata, ConvertConfig, ImageAsset, MistralOcrResponse, OcrPage, OcrTable, RenderedBook,
     RenderedChapter, TableFormat,
 };
 use base64::engine::general_purpose::STANDARD as BASE64;
@@ -13,6 +13,7 @@ use std::path::Path;
 pub fn normalize_to_rendered_book(
     payload: &MistralOcrResponse,
     cfg: &ConvertConfig,
+    metadata: &BookMetadata,
     source_pdf: &Path,
     source_hash: &str,
 ) -> Result<RenderedBook> {
@@ -20,10 +21,14 @@ pub fn normalize_to_rendered_book(
     pages.sort_by_key(|page| page.index);
 
     if cfg.comic_mode {
-        return normalize_comic_to_rendered_book(&pages, cfg, source_pdf, source_hash);
+        return normalize_comic_to_rendered_book(&pages, cfg, metadata, source_pdf, source_hash);
     }
 
-    let (images, image_map) = extract_images(&pages, cfg.include_images)?;
+    let extracted_images = extract_images(&pages, cfg.include_images)?;
+    let language = metadata
+        .language
+        .clone()
+        .unwrap_or_else(|| cfg.language.clone());
 
     let mut page_markdown = Vec::new();
     for page in &pages {
@@ -33,7 +38,7 @@ pub fn normalize_to_rendered_book(
         markdown = replace_table_placeholders(markdown, page, cfg.table_format);
 
         if cfg.include_images {
-            markdown = replace_image_placeholders(markdown, &image_map);
+            markdown = replace_image_placeholders(markdown, &extracted_images.image_map);
         } else {
             markdown = strip_markdown_images(markdown);
         }
@@ -68,7 +73,7 @@ pub fn normalize_to_rendered_book(
 
         let file_name = format!("chapter-{:03}-{unique_slug}.xhtml", index + 1);
         let html_fragment = render_markdown_to_html(&markdown);
-        let xhtml = wrap_xhtml_document(&title, &cfg.language, &html_fragment);
+        let xhtml = wrap_xhtml_document(&title, &language, &html_fragment);
 
         chapters.push(RenderedChapter {
             id: format!("chapter-{:03}", index + 1),
@@ -82,29 +87,38 @@ pub fn normalize_to_rendered_book(
     let title = cfg
         .title
         .clone()
+        .or_else(|| metadata.title.clone())
         .or_else(|| chapters.first().map(|chapter| chapter.title.clone()))
         .unwrap_or_else(|| sanitize_file_stem(source_pdf));
 
     Ok(RenderedBook {
         title,
-        author: cfg.author.clone(),
-        language: cfg.language.clone(),
-        publisher: cfg.publisher.clone(),
+        author: cfg.author.clone().or_else(|| metadata.author.clone()),
+        language,
+        publisher: cfg.publisher.clone().or_else(|| metadata.publisher.clone()),
+        description: metadata.description.clone(),
+        subjects: metadata.subjects.clone(),
         source_hash: source_hash.to_owned(),
         chapters,
-        images,
+        images: extracted_images.images,
+        cover_image: extracted_images.cover_image,
     })
 }
 
 fn normalize_comic_to_rendered_book(
     pages: &[OcrPage],
     cfg: &ConvertConfig,
+    metadata: &BookMetadata,
     source_pdf: &Path,
     source_hash: &str,
 ) -> Result<RenderedBook> {
-    let (images, image_map) = extract_images(pages, true)?;
+    let extracted_images = extract_images(pages, true)?;
+    let language = metadata
+        .language
+        .clone()
+        .unwrap_or_else(|| cfg.language.clone());
 
-    if images.is_empty() {
+    if extracted_images.images.is_empty() {
         return Err(BaegunError::ocr_schema(
             "Comic mode requires OCR image payloads, but no images were found.",
         ));
@@ -112,7 +126,8 @@ fn normalize_comic_to_rendered_book(
 
     let mut chapters = Vec::new();
     for page in pages {
-        let Some(image_path) = resolve_comic_page_image_path(page, &image_map) else {
+        let Some(image_path) = resolve_comic_page_image_path(page, &extracted_images.image_map)
+        else {
             continue;
         };
 
@@ -125,7 +140,7 @@ fn normalize_comic_to_rendered_book(
             title: title.clone(),
             file_name: format!("chapter-{chapter_number:03}-page-{page_number:03}.xhtml"),
             markdown: format!("![{title}]({image_path})"),
-            xhtml: render_comic_page_xhtml(&title, &cfg.language, &image_path),
+            xhtml: render_comic_page_xhtml(&title, &language, &image_path),
         });
     }
 
@@ -138,26 +153,35 @@ fn normalize_comic_to_rendered_book(
     let title = cfg
         .title
         .clone()
+        .or_else(|| metadata.title.clone())
         .unwrap_or_else(|| sanitize_file_stem(source_pdf));
 
     Ok(RenderedBook {
         title,
-        author: cfg.author.clone(),
-        language: cfg.language.clone(),
-        publisher: cfg.publisher.clone(),
+        author: cfg.author.clone().or_else(|| metadata.author.clone()),
+        language,
+        publisher: cfg.publisher.clone().or_else(|| metadata.publisher.clone()),
+        description: metadata.description.clone(),
+        subjects: metadata.subjects.clone(),
         source_hash: source_hash.to_owned(),
         chapters,
-        images,
+        images: extracted_images.images,
+        cover_image: extracted_images.cover_image,
     })
 }
 
-fn extract_images(pages: &[OcrPage], include_images: bool) -> Result<(Vec<ImageAsset>, HashMap<String, String>)> {
-    if !include_images {
-        return Ok((Vec::new(), HashMap::new()));
-    }
+struct ExtractedImages {
+    images: Vec<ImageAsset>,
+    image_map: HashMap<String, String>,
+    cover_image: Option<String>,
+}
+
+fn extract_images(pages: &[OcrPage], include_images: bool) -> Result<ExtractedImages> {
+    let first_page_index = pages.first().map(|page| page.index);
 
     let mut images = Vec::new();
     let mut image_map = HashMap::new();
+    let mut cover_image = None;
     let mut seen_placeholders = HashSet::new();
     let mut used_filenames = HashSet::new();
 
@@ -171,6 +195,11 @@ fn extract_images(pages: &[OcrPage], include_images: bool) -> Result<(Vec<ImageA
                 continue;
             };
 
+            let is_cover_candidate = cover_image.is_none() && Some(page.index) == first_page_index;
+            if !include_images && !is_cover_candidate {
+                continue;
+            }
+
             let bytes = decode_ocr_image_base64(encoded).map_err(|error| {
                 BaegunError::ocr_schema(format!(
                     "Failed decoding OCR image '{}' as base64: {error}",
@@ -181,7 +210,12 @@ fn extract_images(pages: &[OcrPage], include_images: bool) -> Result<(Vec<ImageA
             let file_name = unique_asset_name(&image.id, page.index, index, &mut used_filenames);
             let media_type = media_type_from_filename(&file_name).to_owned();
 
-            image_map.insert(image.id.clone(), format!("../images/{file_name}"));
+            if include_images {
+                image_map.insert(image.id.clone(), format!("../images/{file_name}"));
+            }
+            if is_cover_candidate {
+                cover_image = Some(file_name.clone());
+            }
             seen_placeholders.insert(image.id.clone());
 
             images.push(ImageAsset {
@@ -192,7 +226,11 @@ fn extract_images(pages: &[OcrPage], include_images: bool) -> Result<(Vec<ImageA
         }
     }
 
-    Ok((images, image_map))
+    Ok(ExtractedImages {
+        images,
+        image_map,
+        cover_image,
+    })
 }
 
 fn decode_ocr_image_base64(encoded: &str) -> std::result::Result<Vec<u8>, base64::DecodeError> {
@@ -246,7 +284,11 @@ fn strip_header_footer(mut markdown: String, header: Option<&str>, footer: Optio
     markdown
 }
 
-fn replace_table_placeholders(mut markdown: String, page: &OcrPage, table_format: TableFormat) -> String {
+fn replace_table_placeholders(
+    mut markdown: String,
+    page: &OcrPage,
+    table_format: TableFormat,
+) -> String {
     for (index, table) in page.tables.iter().enumerate() {
         let replacement = match table_format {
             TableFormat::Html => table
@@ -295,9 +337,19 @@ fn collect_table_identifiers(table: &OcrTable, page_index: usize, index: usize) 
     push_unique(table.id.as_deref());
     push_unique(table.extra.get("table_id").and_then(|value| value.as_str()));
     push_unique(table.extra.get("id").and_then(|value| value.as_str()));
-    push_unique(table.extra.get("file_name").and_then(|value| value.as_str()));
+    push_unique(
+        table
+            .extra
+            .get("file_name")
+            .and_then(|value| value.as_str()),
+    );
     push_unique(table.extra.get("path").and_then(|value| value.as_str()));
-    push_unique(table.extra.get("placeholder").and_then(|value| value.as_str()));
+    push_unique(
+        table
+            .extra
+            .get("placeholder")
+            .and_then(|value| value.as_str()),
+    );
 
     let fallback = format!("tbl-{page_index}-{index}.html");
     if !identifiers.iter().any(|existing| existing == &fallback) {
@@ -323,7 +375,9 @@ fn replace_table_reference(markdown: String, table_id: &str, content: &str) -> S
     let mut updated = markdown;
     for pattern in patterns {
         if let Ok(regex) = Regex::new(&pattern) {
-            updated = regex.replace_all(&updated, replacement.as_str()).to_string();
+            updated = regex
+                .replace_all(&updated, replacement.as_str())
+                .to_string();
         }
     }
 
@@ -332,10 +386,7 @@ fn replace_table_reference(markdown: String, table_id: &str, content: &str) -> S
 
 fn replace_image_placeholders(mut markdown: String, image_map: &HashMap<String, String>) -> String {
     for (placeholder, relative_path) in image_map {
-        markdown = markdown.replace(
-            &format!("]({placeholder})"),
-            &format!("]({relative_path})"),
-        );
+        markdown = markdown.replace(&format!("]({placeholder})"), &format!("]({relative_path})"));
     }
     markdown
 }
@@ -347,7 +398,10 @@ fn strip_markdown_images(markdown: String) -> String {
     regex.replace_all(&markdown, "").to_string()
 }
 
-fn resolve_comic_page_image_path(page: &OcrPage, image_map: &HashMap<String, String>) -> Option<String> {
+fn resolve_comic_page_image_path(
+    page: &OcrPage,
+    image_map: &HashMap<String, String>,
+) -> Option<String> {
     for image in &page.images {
         if let Some(mapped) = image_map.get(&image.id) {
             return Some(mapped.clone());
@@ -489,10 +543,7 @@ fn collect_heading_candidates(lines: &[&str]) -> Vec<ChapterBoundary> {
             if !current.is_empty() {
                 if let Some(regex) = &setext_re {
                     if let Some(captures) = regex.captures(lines[index + 1]) {
-                        let marker = captures
-                            .get(1)
-                            .map(|value| value.as_str())
-                            .unwrap_or("");
+                        let marker = captures.get(1).map(|value| value.as_str()).unwrap_or("");
                         let level = if marker.starts_with('=') { 1 } else { 2 };
                         let title = sanitize_heading_title(current);
                         if !title.is_empty() {
@@ -581,11 +632,7 @@ fn collect_chapter_line_boundaries(lines: &[&str]) -> Vec<ChapterBoundary> {
 }
 
 fn sanitize_heading_title(value: &str) -> String {
-    value
-        .trim()
-        .trim_matches('#')
-        .trim()
-        .to_owned()
+    value.trim().trim_matches('#').trim().to_owned()
 }
 
 fn join_lines_trimmed(lines: &[&str]) -> String {
@@ -820,12 +867,9 @@ mod tests {
                 html: Some("<table><tr><td>X</td></tr></table>".to_string()),
                 markdown: None,
                 content: None,
-                extra: [(
-                    "table_id".to_string(),
-                    json!("table-main.html"),
-                )]
-                .into_iter()
-                .collect(),
+                extra: [("table_id".to_string(), json!("table-main.html"))]
+                    .into_iter()
+                    .collect(),
             }],
             hyperlinks: Vec::new(),
             header: None,
@@ -878,7 +922,10 @@ mod tests {
             dimensions: None,
         };
 
-        let map = HashMap::from([(String::from("img-1.png"), String::from("../images/img-1.png"))]);
+        let map = HashMap::from([(
+            String::from("img-1.png"),
+            String::from("../images/img-1.png"),
+        )]);
         let resolved = resolve_comic_page_image_path(&page, &map);
         assert_eq!(resolved.as_deref(), Some("../images/img-1.png"));
     }
