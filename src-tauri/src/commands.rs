@@ -1,8 +1,10 @@
-use baegun_core::{convert_pdf_to_epub_with_progress, ConvertConfig, ConvertProgress, ConvertStage, TableFormat};
+use baegun_core::{
+    convert_pdf_to_epub_with_progress, ConvertConfig, ConvertProgress, ConvertStage, TableFormat,
+};
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::path::PathBuf;
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
 const CONVERT_PROGRESS_EVENT: &str = "baegun://convert-progress";
 
@@ -55,7 +57,10 @@ pub struct ConvertProgressEvent {
 }
 
 #[tauri::command]
-pub async fn convert_pdf(app: tauri::AppHandle, request: ConvertRequest) -> Result<ConvertResponse, String> {
+pub async fn convert_pdf(
+    app: tauri::AppHandle,
+    request: ConvertRequest,
+) -> Result<ConvertResponse, String> {
     let input_path = PathBuf::from(request.input_path.clone());
     let output_path = request
         .output_path
@@ -76,6 +81,14 @@ pub async fn convert_pdf(app: tauri::AppHandle, request: ConvertRequest) -> Resu
 
     let comic_mode = request.comic_mode.unwrap_or(false);
 
+    let cache_dir = match request.cache_dir.as_deref().map(str::trim) {
+        Some(cache_dir) if !cache_dir.is_empty() => PathBuf::from(cache_dir),
+        _ => app
+            .path()
+            .app_cache_dir()
+            .map_err(|error| format!("Failed resolving app cache directory: {error}"))?,
+    };
+
     let cfg = ConvertConfig {
         input_pdf: input_path,
         output_epub: output_path,
@@ -92,10 +105,7 @@ pub async fn convert_pdf(app: tauri::AppHandle, request: ConvertRequest) -> Resu
         extract_footer: request.extract_footer.unwrap_or(true),
         include_images: request.include_images.unwrap_or(true) || comic_mode,
         comic_mode,
-        cache_dir: request
-            .cache_dir
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from(".baegun-cache")),
+        cache_dir,
         no_cache: request.no_cache.unwrap_or(false),
         validate: request.validate.unwrap_or(false),
         epubcheck_bin: request
@@ -127,9 +137,9 @@ pub async fn convert_pdf(app: tauri::AppHandle, request: ConvertRequest) -> Resu
             let _ = app_handle.emit(CONVERT_PROGRESS_EVENT, event);
         })
     })
-        .await
-        .map_err(|error| format!("Conversion task failed to join: {error}"))?
-        .map_err(|error| error.message)?;
+    .await
+    .map_err(|error| format!("Conversion task failed to join: {error}"))?
+    .map_err(|error| error.message)?;
 
     let (validation_warnings, validation_errors) = summary
         .validation

@@ -84,6 +84,7 @@ Common options:
 ## Desktop App Notes
 
 - Open `Settings...` to set your Mistral API key and conversion toggles (`Include images`, `Comic mode`, `Run epubcheck`).
+- Desktop conversions store OCR cache files in the operating system's app cache directory.
 - `Comic mode` emits one image-first EPUB chapter per source page using OCR image payloads.
 - The queue supports per-file removal, and the conversion progress modal supports canceling the remaining queue after the current file finishes.
 
