@@ -27,7 +27,7 @@ No Python runtime or Tk GUI remains in the main architecture.
 - During desktop conversions, backend stage progress events are emitted and shown in the progress modal (input, OCR, normalize, package, optional validate, complete).
 - The desktop queue supports per-file removal, and the progress modal includes a cancel button that stops after the current in-flight file.
 - EPUB output marks the first extracted image from the first PDF page as the cover image.
-- EPUB metadata is resolved from explicit config, PDF metadata, and best-effort Mistral LLM generation from OCR content when needed.
+- EPUB metadata is resolved from explicit config, cover/title-page OCR text, PDF metadata, and best-effort Mistral LLM generation from OCR content when needed.
 - Desktop validation resolves `epubcheck` from `PATH`, bundled resources, common Homebrew/MacPorts locations, or `EPUBCHECK_BIN`.
 
 ## Quality Gates
@@ -200,7 +200,7 @@ Request fields used:
 OCR payloads are expected to include `pages[]` with markdown + optional images/tables.
 Image payloads can arrive as raw base64 or `data:*;base64,...` data URIs and should be decoded in either shape.
 OCR image payloads are requested for all conversions so the first page image can be used as the EPUB cover, even when body image embedding is disabled.
-When title/author/description/subjects are missing, cached OCR text can be sent to Mistral chat completions for best-effort EPUB metadata generation. Explicit config values take precedence.
+When title/author/description/subjects are missing, cached OCR text can be sent to Mistral chat completions for best-effort EPUB metadata generation. Explicit config values take precedence, and cover/title-page OCR is preferred for title and author.
 
 ## EPUB Packaging Rules
 

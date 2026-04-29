@@ -157,7 +157,29 @@ endobj
     fs::write(&input_pdf, pdf_bytes).expect("input PDF fixture should be written");
 
     let cfg = fixture_config(input_pdf.clone(), output_epub, cache_dir);
-    seed_cache_from_fixture(&cfg, pdf_bytes);
+    seed_cache_json(
+        &cfg,
+        pdf_bytes,
+        r##"{
+  "model": "mistral-ocr-latest",
+  "pages": [
+    {
+      "index": 0,
+      "markdown": "![Cover](img-cover.png)",
+      "images": [
+        {
+          "id": "img-cover.png",
+          "image_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2V4x8AAAAASUVORK5CYII="
+        }
+      ]
+    },
+    {
+      "index": 1,
+      "markdown": "# Chapter One\n\nReadable content."
+    }
+  ]
+}"##,
+    );
 
     let summary = convert_pdf_to_epub(&cfg).expect("cached fixture conversion should succeed");
     let mut archive = ZipArchive::new(File::open(&summary.output_path).expect("epub should exist"))
@@ -267,6 +289,10 @@ fn seed_cache_from_fixture(cfg: &ConvertConfig, pdf_bytes: &[u8]) {
         )
     });
 
+    seed_cache_json(cfg, pdf_bytes, &fixture_json);
+}
+
+fn seed_cache_json(cfg: &ConvertConfig, pdf_bytes: &[u8], fixture_json: &str) {
     let cache_key = compute_cache_key(cfg, pdf_bytes);
     let cache_path = cfg.cache_dir.join(format!("{cache_key}.ocr.json"));
 

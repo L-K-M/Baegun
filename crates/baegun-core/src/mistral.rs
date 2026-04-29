@@ -82,7 +82,7 @@ pub(crate) fn generate_book_metadata(
         "messages": [
             {
                 "role": "system",
-                "content": "Extract or infer EPUB metadata from OCR text. Return only compact JSON with keys title, author, publisher, language, description, subjects. Use null for unknown scalar fields. Use a short BCP-47 language code when evident. subjects must be an array of up to 8 concise subject tags. Do not invent a human author when there is no evidence."
+                "content": "Extract or infer EPUB metadata from OCR text. The first OCR pages are usually the cover or title page; prioritize title and author exactly as printed there. Strip leading labels such as 'by' from author names. Do not use chapter headings, running headers, or table-of-contents entries as the book title when a cover/title-page title exists. Return only compact JSON with keys title, author, publisher, language, description, subjects. Use null for unknown scalar fields. Use a short BCP-47 language code when evident. subjects must be an array of up to 8 concise subject tags. Do not invent a human author when there is no evidence."
             },
             {
                 "role": "user",

@@ -9,19 +9,33 @@ pub fn resolve_book_metadata(
     ocr_payload: &MistralOcrResponse,
 ) -> BookMetadata {
     let pdf_metadata = extract_pdf_metadata(pdf_bytes);
-    let needs_llm = missing_metadata(cfg, &pdf_metadata);
+    let cover_metadata = infer_ocr_cover_metadata(ocr_payload);
+    let needs_llm = missing_metadata(cfg, &pdf_metadata, &cover_metadata);
     let llm_metadata = if needs_llm {
         mistral::generate_book_metadata(cfg, ocr_payload).ok()
     } else {
         None
     };
 
-    merge_metadata(cfg, pdf_metadata, llm_metadata.unwrap_or_default())
+    merge_metadata(
+        cfg,
+        pdf_metadata,
+        cover_metadata,
+        llm_metadata.unwrap_or_default(),
+    )
 }
 
-fn missing_metadata(cfg: &ConvertConfig, pdf_metadata: &BookMetadata) -> bool {
-    missing_opt(cfg.title.as_deref()) && pdf_metadata.title.is_none()
-        || missing_opt(cfg.author.as_deref()) && pdf_metadata.author.is_none()
+fn missing_metadata(
+    cfg: &ConvertConfig,
+    pdf_metadata: &BookMetadata,
+    cover_metadata: &BookMetadata,
+) -> bool {
+    missing_opt(cfg.title.as_deref())
+        && pdf_metadata.title.is_none()
+        && cover_metadata.title.is_none()
+        || missing_opt(cfg.author.as_deref())
+            && pdf_metadata.author.is_none()
+            && cover_metadata.author.is_none()
         || missing_opt(cfg.publisher.as_deref()) && pdf_metadata.publisher.is_none()
         || cfg.language.trim().eq_ignore_ascii_case("en") && pdf_metadata.language.is_none()
         || pdf_metadata.description.is_none()
@@ -31,6 +45,7 @@ fn missing_metadata(cfg: &ConvertConfig, pdf_metadata: &BookMetadata) -> bool {
 fn merge_metadata(
     cfg: &ConvertConfig,
     pdf_metadata: BookMetadata,
+    cover_metadata: BookMetadata,
     llm_metadata: BookMetadata,
 ) -> BookMetadata {
     let mut subjects = Vec::new();
@@ -38,8 +53,18 @@ fn merge_metadata(
     push_subjects(&mut subjects, llm_metadata.subjects);
 
     BookMetadata {
-        title: first_non_empty([cfg.title.clone(), pdf_metadata.title, llm_metadata.title]),
-        author: first_non_empty([cfg.author.clone(), pdf_metadata.author, llm_metadata.author]),
+        title: first_non_empty([
+            cfg.title.clone(),
+            cover_metadata.title,
+            pdf_metadata.title,
+            llm_metadata.title,
+        ]),
+        author: first_non_empty([
+            cfg.author.clone(),
+            cover_metadata.author,
+            pdf_metadata.author,
+            llm_metadata.author,
+        ]),
         language: resolve_language(cfg, pdf_metadata.language, llm_metadata.language),
         publisher: first_non_empty([
             cfg.publisher.clone(),
@@ -94,6 +119,162 @@ fn extract_pdf_metadata(pdf_bytes: &[u8]) -> BookMetadata {
         find_xml_bag_items(&pdf_text, "dc:subject"),
     );
     metadata
+}
+
+fn infer_ocr_cover_metadata(ocr_payload: &MistralOcrResponse) -> BookMetadata {
+    let lines = cover_candidate_lines(ocr_payload);
+    let title = infer_cover_title(&lines);
+    let author = infer_cover_author(&lines, title.as_deref());
+
+    BookMetadata {
+        title,
+        author,
+        ..BookMetadata::default()
+    }
+}
+
+fn cover_candidate_lines(ocr_payload: &MistralOcrResponse) -> Vec<String> {
+    let mut pages = ocr_payload.pages.iter().collect::<Vec<_>>();
+    pages.sort_by_key(|page| page.index);
+
+    pages
+        .into_iter()
+        .take(1)
+        .flat_map(|page| page.markdown.lines())
+        .filter_map(clean_cover_line)
+        .take(24)
+        .collect()
+}
+
+fn infer_cover_title(lines: &[String]) -> Option<String> {
+    lines
+        .iter()
+        .find(|line| !is_author_marker_line(line) && !is_cover_noise(line))
+        .and_then(|line| clean_metadata_value(line))
+}
+
+fn infer_cover_author(lines: &[String], title: Option<&str>) -> Option<String> {
+    if let Some(author) = lines.iter().find_map(|line| author_from_marker_line(line)) {
+        return Some(author);
+    }
+
+    let start = title
+        .and_then(|title| lines.iter().position(|line| line == title))
+        .map(|index| index + 1)
+        .unwrap_or(1);
+
+    lines
+        .iter()
+        .skip(start)
+        .take(6)
+        .find(|line| looks_like_person_name(line))
+        .and_then(|line| clean_metadata_value(line))
+}
+
+fn clean_cover_line(raw: &str) -> Option<String> {
+    let mut line = raw.trim();
+    if line.is_empty() || line.starts_with("![") || line.starts_with('|') {
+        return None;
+    }
+
+    while let Some(stripped) = line.strip_prefix('#') {
+        line = stripped.trim_start();
+    }
+
+    line = line
+        .trim_start_matches(['>', '-', '*', '+'])
+        .trim()
+        .trim_matches(['*', '_', '`'])
+        .trim();
+
+    if let Some(link_text) = markdown_link_text(line) {
+        line = link_text;
+    }
+
+    if line.starts_with('<') && line.ends_with('>') || line.contains("</") {
+        return None;
+    }
+
+    clean_metadata_value(line).filter(|value| !is_cover_noise(value))
+}
+
+fn markdown_link_text(line: &str) -> Option<&str> {
+    let close = line.strip_prefix('[')?.find(']')? + 1;
+    let after = line.get(close + 1..)?.trim_start();
+    after.starts_with('(').then_some(line.get(1..close)?)
+}
+
+fn author_from_marker_line(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    let lowered = trimmed.to_ascii_lowercase();
+    for marker in [
+        "by ",
+        "author:",
+        "written by ",
+        "edited by ",
+        "translated by ",
+    ] {
+        if lowered.starts_with(marker) {
+            let author = trimmed.get(marker.len()..)?.trim();
+            return clean_metadata_value(author);
+        }
+    }
+
+    None
+}
+
+fn is_author_marker_line(line: &str) -> bool {
+    author_from_marker_line(line).is_some()
+}
+
+fn looks_like_person_name(line: &str) -> bool {
+    if is_cover_noise(line) || line.contains(':') || line.ends_with('?') || line.ends_with('!') {
+        return false;
+    }
+
+    let words = line.split_whitespace().collect::<Vec<_>>();
+    if !(2..=6).contains(&words.len()) {
+        return false;
+    }
+
+    words.iter().all(|word| {
+        let cleaned = word.trim_matches(|ch: char| matches!(ch, ',' | '.' | '-' | '’' | '\''));
+        if cleaned.is_empty() || cleaned.chars().any(|ch| ch.is_ascii_digit()) {
+            return false;
+        }
+
+        let lower = cleaned.to_ascii_lowercase();
+        if matches!(
+            lower.as_str(),
+            "de" | "del" | "da" | "van" | "von" | "la" | "le"
+        ) {
+            return true;
+        }
+
+        cleaned
+            .chars()
+            .next()
+            .is_some_and(|ch| ch.is_ascii_uppercase())
+            || cleaned.chars().all(|ch| ch.is_ascii_uppercase())
+    })
+}
+
+fn is_cover_noise(line: &str) -> bool {
+    let lower = line.trim().to_ascii_lowercase();
+    if lower.len() <= 2 && lower.chars().all(|ch| ch.is_ascii_digit()) {
+        return true;
+    }
+
+    lower.starts_with("isbn")
+        || lower.starts_with("chapter ")
+        || lower == "contents"
+        || lower == "table of contents"
+        || lower.contains("all rights reserved")
+        || lower.contains("copyright")
+        || lower.contains('\u{a9}')
+        || lower.contains("www.")
+        || lower.contains("http://")
+        || lower.contains("https://")
 }
 
 fn find_pdf_info_string(pdf_text: &str, key: &str) -> Option<String> {
@@ -281,7 +462,8 @@ fn xml_unescape(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{decode_pdf_string, extract_pdf_metadata};
+    use super::{decode_pdf_string, extract_pdf_metadata, infer_ocr_cover_metadata};
+    use crate::models::{MistralOcrResponse, OcrPage};
 
     #[test]
     fn extracts_pdf_info_metadata() {
@@ -306,5 +488,41 @@ endobj
     fn decodes_utf16_pdf_hex_string() {
         let decoded = decode_pdf_string("<FEFF00420061006500670075006E>");
         assert_eq!(decoded.as_deref(), Some("Baegun"));
+    }
+
+    #[test]
+    fn infers_title_and_author_from_ocr_cover_page() {
+        let metadata = infer_ocr_cover_metadata(&ocr_payload(
+            "# The Analytical Engine\n\nby Ada Lovelace\n\n![Cover](cover.png)",
+        ));
+
+        assert_eq!(metadata.title.as_deref(), Some("The Analytical Engine"));
+        assert_eq!(metadata.author.as_deref(), Some("Ada Lovelace"));
+    }
+
+    #[test]
+    fn infers_author_from_name_after_cover_title() {
+        let metadata =
+            infer_ocr_cover_metadata(&ocr_payload("Deep Work\n\nCal Newport\n\nCopyright 2016"));
+
+        assert_eq!(metadata.title.as_deref(), Some("Deep Work"));
+        assert_eq!(metadata.author.as_deref(), Some("Cal Newport"));
+    }
+
+    fn ocr_payload(markdown: &str) -> MistralOcrResponse {
+        MistralOcrResponse {
+            pages: vec![OcrPage {
+                index: 0,
+                markdown: markdown.to_string(),
+                images: Vec::new(),
+                tables: Vec::new(),
+                hyperlinks: Vec::new(),
+                header: None,
+                footer: None,
+                dimensions: None,
+            }],
+            model: None,
+            usage_info: None,
+        }
     }
 }
