@@ -10,6 +10,9 @@ The converter uses Mistral OCR to extract structured markdown, images, and table
 OCR image payloads are accepted as either raw base64 strings or `data:*;base64,...` data URIs.
 Metadata generation uses the configured Mistral API key and is skipped when enough metadata is already present or no API key is available.
 
+> [!IMPORTANT]
+> LLM Disclosure: Much of this code base was written with the help of large language models — AI coding agents working from the [`AGENTS.md`](AGENTS.md) implementation handoff, which is kept in sync with the code.
+
 ## Prerequisites
 
 - Rust toolchain (`cargo`, `rustc`)
