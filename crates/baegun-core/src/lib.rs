@@ -133,7 +133,7 @@ where
         Some(cache_hit),
     );
 
-    let book_metadata = metadata::resolve_book_metadata(cfg, &pdf_bytes, &ocr_payload);
+    let book_metadata = metadata::resolve_book_metadata(cfg, &pdf_bytes, &ocr_payload, &cache_key);
     let rendered = normalize::normalize_to_rendered_book(
         &ocr_payload,
         cfg,
