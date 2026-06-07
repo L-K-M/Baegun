@@ -654,7 +654,99 @@ fn render_markdown_to_html(markdown: &str) -> String {
         .replace("<blockquote>", "<aside class=\"callout\">")
         .replace("</blockquote>", "</aside>");
 
+    let html_output = make_xhtml_compatible(&html_output);
+
     add_heading_anchors(html_output)
+}
+
+/// Best-effort hardening of a rendered HTML fragment toward well-formed XHTML.
+///
+/// `pulldown-cmark` passes raw inline/block HTML straight through, and OCR table
+/// payloads are injected verbatim before rendering. EPUB chapter documents must be
+/// well-formed XML, so unclosed void elements (`<br>`, `<img>`) and bare ampersands
+/// coming from that raw HTML would otherwise make the chapter invalid and fail
+/// epubcheck. This fixes the two failure modes seen most often in real OCR output.
+/// It is not a full HTML5 parser, so deeply malformed markup (e.g. unclosed
+/// `<td>`) is still out of scope.
+fn make_xhtml_compatible(html: &str) -> String {
+    let closed = close_void_elements(html);
+    escape_bare_ampersands(&closed)
+}
+
+fn close_void_elements(html: &str) -> String {
+    // Self-close HTML void elements (with or without an existing trailing slash) so
+    // the output is valid XML. Attribute values containing `>` are not handled, but
+    // that essentially never occurs in OCR table markup.
+    let Ok(regex) = Regex::new(
+        r"(?i)<(br|hr|img|col|input|meta|link|area|base|source|track|wbr)([^>]*?)\s*/?>",
+    ) else {
+        return html.to_owned();
+    };
+
+    regex
+        .replace_all(html, |caps: &regex::Captures<'_>| {
+            let tag = caps[1].to_ascii_lowercase();
+            let attrs = caps.get(2).map(|value| value.as_str().trim()).unwrap_or("");
+            if attrs.is_empty() {
+                format!("<{tag} />")
+            } else {
+                format!("<{tag} {attrs} />")
+            }
+        })
+        .to_string()
+}
+
+fn escape_bare_ampersands(input: &str) -> String {
+    let mut output = String::with_capacity(input.len());
+    let mut rest = input;
+
+    while let Some(position) = rest.find('&') {
+        output.push_str(&rest[..position]);
+        let after = &rest[position + 1..];
+        if is_entity_reference(after) {
+            output.push('&');
+        } else {
+            output.push_str("&amp;");
+        }
+        rest = after;
+    }
+
+    output.push_str(rest);
+    output
+}
+
+/// Returns true when `after` (the text immediately following an `&`) begins a valid
+/// character reference: `name;`, `#123;`, or `#xAB;`.
+fn is_entity_reference(after: &str) -> bool {
+    let bytes = after.as_bytes();
+    if bytes.is_empty() {
+        return false;
+    }
+
+    let mut index = 0;
+    if bytes[index] == b'#' {
+        index += 1;
+        if index < bytes.len() && matches!(bytes[index], b'x' | b'X') {
+            index += 1;
+            let start = index;
+            while index < bytes.len() && bytes[index].is_ascii_hexdigit() {
+                index += 1;
+            }
+            return index > start && bytes.get(index) == Some(&b';');
+        }
+
+        let start = index;
+        while index < bytes.len() && bytes[index].is_ascii_digit() {
+            index += 1;
+        }
+        return index > start && bytes.get(index) == Some(&b';');
+    }
+
+    let start = index;
+    while index < bytes.len() && bytes[index].is_ascii_alphanumeric() {
+        index += 1;
+    }
+    index > start && bytes.get(index) == Some(&b';')
 }
 
 fn add_heading_anchors(input: String) -> String {
@@ -813,8 +905,8 @@ fn xml_escape(input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        decode_ocr_image_base64, replace_table_placeholders, resolve_comic_page_image_path,
-        split_into_chapters,
+        decode_ocr_image_base64, make_xhtml_compatible, render_markdown_to_html,
+        replace_table_placeholders, resolve_comic_page_image_path, split_into_chapters,
     };
     use crate::models::{OcrPage, OcrTable, TableFormat};
     use serde_json::json;
@@ -903,6 +995,34 @@ mod tests {
         let decoded = decode_ocr_image_base64("data:image/png;base64,dG Vz\ndA==")
             .expect("payload with whitespace should decode");
         assert_eq!(decoded, b"test");
+    }
+
+    #[test]
+    fn raw_table_html_is_made_xhtml_compatible() {
+        // Raw HTML blocks (e.g. OCR table payloads) pass straight through the markdown
+        // renderer, so void elements and bare ampersands must be normalized for XHTML.
+        let rendered = render_markdown_to_html(
+            "<table><tr><td>AT&T<br></td><td><img src=\"a.png\"></td></tr></table>",
+        );
+
+        assert!(rendered.contains("AT&amp;T"));
+        assert!(rendered.contains("<br />"));
+        assert!(rendered.contains("<img src=\"a.png\" />"));
+        assert!(!rendered.contains("<br>"));
+    }
+
+    #[test]
+    fn existing_entities_and_self_closed_tags_are_preserved() {
+        let input = "<p>a &amp; b &#160; c &#x41; <br /> <img src=\"x.png\" /></p>";
+        let normalized = make_xhtml_compatible(input);
+
+        assert!(normalized.contains("&amp;"));
+        assert!(normalized.contains("&#160;"));
+        assert!(normalized.contains("&#x41;"));
+        assert!(!normalized.contains("&amp;amp;"));
+        assert!(!normalized.contains("<br /> />"));
+        assert_eq!(normalized.matches("<br />").count(), 1);
+        assert_eq!(normalized.matches("<img src=\"x.png\" />").count(), 1);
     }
 
     #[test]
