@@ -1,3 +1,4 @@
+use crate::cache;
 use crate::mistral;
 use crate::models::{BookMetadata, ConvertConfig, MistralOcrResponse};
 use regex::Regex;
@@ -7,12 +8,13 @@ pub fn resolve_book_metadata(
     cfg: &ConvertConfig,
     pdf_bytes: &[u8],
     ocr_payload: &MistralOcrResponse,
+    cache_key: &str,
 ) -> BookMetadata {
     let pdf_metadata = extract_pdf_metadata(pdf_bytes);
     let cover_metadata = infer_ocr_cover_metadata(ocr_payload);
     let needs_llm = missing_metadata(cfg, &pdf_metadata, &cover_metadata);
     let llm_metadata = if needs_llm {
-        mistral::generate_book_metadata(cfg, ocr_payload).ok()
+        resolve_llm_metadata(cfg, ocr_payload, cache_key)
     } else {
         None
     };
@@ -25,21 +27,46 @@ pub fn resolve_book_metadata(
     )
 }
 
+/// Returns LLM-generated metadata, reusing a cached result when available so that
+/// repeat conversions (including OCR cache hits) do not re-issue the chat request.
+fn resolve_llm_metadata(
+    cfg: &ConvertConfig,
+    ocr_payload: &MistralOcrResponse,
+    cache_key: &str,
+) -> Option<BookMetadata> {
+    if let Some(cached) = cache::load_cached_metadata(cfg, cache_key) {
+        return Some(cached);
+    }
+
+    let generated = mistral::generate_book_metadata(cfg, ocr_payload).ok()?;
+    let _ = cache::store_cached_metadata(cfg, cache_key, &generated);
+    Some(generated)
+}
+
 fn missing_metadata(
     cfg: &ConvertConfig,
     pdf_metadata: &BookMetadata,
     cover_metadata: &BookMetadata,
 ) -> bool {
-    missing_opt(cfg.title.as_deref())
+    let title_missing = missing_opt(cfg.title.as_deref())
         && pdf_metadata.title.is_none()
-        && cover_metadata.title.is_none()
-        || missing_opt(cfg.author.as_deref())
-            && pdf_metadata.author.is_none()
-            && cover_metadata.author.is_none()
-        || missing_opt(cfg.publisher.as_deref()) && pdf_metadata.publisher.is_none()
-        || cfg.language.trim().eq_ignore_ascii_case("en") && pdf_metadata.language.is_none()
-        || pdf_metadata.description.is_none()
-        || pdf_metadata.subjects.is_empty()
+        && cover_metadata.title.is_none();
+    let author_missing = missing_opt(cfg.author.as_deref())
+        && pdf_metadata.author.is_none()
+        && cover_metadata.author.is_none();
+    let publisher_missing =
+        missing_opt(cfg.publisher.as_deref()) && pdf_metadata.publisher.is_none();
+    let language_missing =
+        cfg.language.trim().eq_ignore_ascii_case("en") && pdf_metadata.language.is_none();
+    let description_missing = pdf_metadata.description.is_none();
+    let subjects_missing = pdf_metadata.subjects.is_empty();
+
+    title_missing
+        || author_missing
+        || publisher_missing
+        || language_missing
+        || description_missing
+        || subjects_missing
 }
 
 fn merge_metadata(
