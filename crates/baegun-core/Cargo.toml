@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 base64.workspace = true
+chrono.workspace = true
 pulldown-cmark.workspace = true
 regex.workspace = true
 reqwest.workspace = true

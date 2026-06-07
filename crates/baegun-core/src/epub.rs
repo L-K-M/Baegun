@@ -185,8 +185,15 @@ fn build_content_opf(book: &RenderedBook) -> String {
         .map(|subject| format!("    <dc:subject>{}</dc:subject>\n", xml_escape(subject)))
         .collect::<String>();
 
+    // EPUB 3 requires exactly one `dcterms:modified` last-modified property in the
+    // package metadata; omitting it makes the package invalid (epubcheck RSC-005).
+    let modified_meta = format!(
+        "    <meta property=\"dcterms:modified\">{}</meta>\n",
+        current_utc_timestamp()
+    );
+
     format!(
-        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<package xmlns=\"http://www.idpf.org/2007/opf\" unique-identifier=\"bookid\" version=\"3.0\">\n  <metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\">\n    <dc:identifier id=\"bookid\">urn:sha256:{}</dc:identifier>\n    <dc:title>{}</dc:title>\n{}    <dc:language>{}</dc:language>\n{}{}{}  </metadata>\n  <manifest>\n{}  </manifest>\n  <spine>\n{}  </spine>\n</package>\n",
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<package xmlns=\"http://www.idpf.org/2007/opf\" unique-identifier=\"bookid\" version=\"3.0\">\n  <metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\">\n    <dc:identifier id=\"bookid\">urn:sha256:{}</dc:identifier>\n    <dc:title>{}</dc:title>\n{}    <dc:language>{}</dc:language>\n{}{}{}{}  </metadata>\n  <manifest>\n{}  </manifest>\n  <spine>\n{}  </spine>\n</package>\n",
         xml_escape(&book.source_hash),
         xml_escape(&book.title),
         author_meta,
@@ -194,9 +201,15 @@ fn build_content_opf(book: &RenderedBook) -> String {
         publisher_meta,
         description_meta,
         subject_meta,
+        modified_meta,
         manifest,
         spine,
     )
+}
+
+fn current_utc_timestamp() -> String {
+    // EPUB 3 expects an xsd:dateTime in UTC with whole seconds, e.g. 2024-01-02T03:04:05Z.
+    chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
 }
 
 fn book_css() -> &'static str {
@@ -291,4 +304,42 @@ fn zip_error(path: &str) -> impl Fn(zip::result::ZipError) -> BaegunError + '_ {
 
 fn io_error(path: &str) -> impl Fn(std::io::Error) -> BaegunError + '_ {
     move |error| BaegunError::epub(format!("Failed writing '{path}': {error}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_content_opf;
+    use crate::models::{RenderedBook, RenderedChapter};
+
+    fn sample_book() -> RenderedBook {
+        RenderedBook {
+            title: "Example".to_string(),
+            author: None,
+            language: "en".to_string(),
+            publisher: None,
+            description: None,
+            subjects: Vec::new(),
+            source_hash: "abc123".to_string(),
+            chapters: vec![RenderedChapter {
+                id: "chapter-001".to_string(),
+                title: "One".to_string(),
+                file_name: "chapter-001-one.xhtml".to_string(),
+                markdown: "Body".to_string(),
+                xhtml: "<html/>".to_string(),
+            }],
+            images: Vec::new(),
+            cover_image: None,
+        }
+    }
+
+    #[test]
+    fn content_opf_includes_dcterms_modified() {
+        let opf = build_content_opf(&sample_book());
+        assert!(
+            opf.contains("<meta property=\"dcterms:modified\">"),
+            "OPF must declare a dcterms:modified property for EPUB 3 validity"
+        );
+        // Whole-second xsd:dateTime in UTC (ends with `Z`), e.g. 2024-01-02T03:04:05Z.
+        assert!(opf.contains("T") && opf.contains("Z</meta>"));
+    }
 }
