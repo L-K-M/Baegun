@@ -243,9 +243,9 @@ If `epubcheck` is installed, test one end-to-end conversion with `--validate`.
 
 ## Dependency release-age policy
 
-- npm installs in this repo are protected by `min-release-age=3` in `.npmrc`.
+- npm installs in this repo are protected by `min-release-age=10` in `.npmrc`.
 - If `npm install` fails because a package is too new, do not repeatedly retry.
 - Use this order:
-  1. wait until the package ages past 3 days,
+  1. wait until the package ages past 10 days,
   2. pin to an older known-good version,
   3. temporarily bypass with `npm install --min-release-age=0` for urgent fixes, then restore the policy.

@@ -9,6 +9,7 @@ use std::process;
 
 #[derive(Debug, Parser)]
 #[command(name = "baegun")]
+#[command(version)]
 #[command(about = "Convert PDFs to EPUBs with Mistral OCR")]
 struct Cli {
     #[command(subcommand)]
@@ -70,13 +71,15 @@ struct CommonConvertArgs {
     #[arg(long, default_value = "html")]
     table_format: String,
 
-    #[arg(long = "extract-header", default_value_t = true)]
+    // These default-on toggles take an explicit boolean value (`--include-images false`);
+    // a plain `bool` flag would get `ArgAction::SetTrue` and could never be disabled.
+    #[arg(long = "extract-header", default_value_t = true, action = ArgAction::Set, value_name = "BOOL")]
     extract_header: bool,
 
-    #[arg(long = "extract-footer", default_value_t = true)]
+    #[arg(long = "extract-footer", default_value_t = true, action = ArgAction::Set, value_name = "BOOL")]
     extract_footer: bool,
 
-    #[arg(long = "include-images", default_value_t = true)]
+    #[arg(long = "include-images", default_value_t = true, action = ArgAction::Set, value_name = "BOOL")]
     include_images: bool,
 
     #[arg(long = "cache-dir", default_value = ".baegun-cache")]
@@ -150,7 +153,13 @@ fn run_convert(args: ConvertArgs) -> Result<(), BaegunError> {
 
     let delete_source = args.options.delete_source;
     let input_path = args.input_pdf.clone();
-    let cfg = build_config(args.input_pdf, output_epub, &args.options, api_key, table_format);
+    let cfg = build_config(
+        args.input_pdf,
+        output_epub,
+        &args.options,
+        api_key,
+        table_format,
+    );
     run_single_conversion(&cfg)?;
 
     if delete_source {
@@ -278,7 +287,11 @@ fn run_convert_batch(args: ConvertBatchArgs) -> Result<(), BaegunError> {
 
     if !args.options.quiet {
         println!();
-        println!("Batch complete: {} succeeded, {} failed.", successes, failures.len());
+        println!(
+            "Batch complete: {} succeeded, {} failed.",
+            successes,
+            failures.len()
+        );
         if successes > 0 {
             println!(
                 "Totals: {} pages, {} chapters, {} images, {}/{} cache hits.",
@@ -434,10 +447,7 @@ fn is_pdf_file(path: &Path) -> bool {
 }
 
 fn derive_batch_output_path(input_pdf: &Path, input_dir: &Path, output_dir: &Path) -> PathBuf {
-    let relative_path = input_pdf
-        .strip_prefix(input_dir)
-        .ok()
-        .unwrap_or(input_pdf);
+    let relative_path = input_pdf.strip_prefix(input_dir).ok().unwrap_or(input_pdf);
     let mut output_epub = output_dir.join(relative_path);
     output_epub.set_extension("epub");
     output_epub
@@ -460,8 +470,45 @@ fn build_batch_failure_error(successes: usize, failures: &[(PathBuf, BaegunError
 
 #[cfg(test)]
 mod tests {
-    use super::{derive_batch_output_path, is_pdf_file};
+    use super::{derive_batch_output_path, is_pdf_file, Cli, Commands};
+    use clap::Parser;
     use std::path::{Path, PathBuf};
+
+    #[test]
+    fn default_on_toggles_accept_explicit_boolean_values() {
+        let cli = Cli::try_parse_from([
+            "baegun",
+            "convert",
+            "in.pdf",
+            "--include-images",
+            "false",
+            "--extract-header",
+            "false",
+            "--extract-footer",
+            "true",
+        ])
+        .expect("documented boolean syntax should parse");
+
+        let Commands::Convert(args) = cli.command else {
+            panic!("expected convert subcommand");
+        };
+        assert!(!args.options.include_images);
+        assert!(!args.options.extract_header);
+        assert!(args.options.extract_footer);
+    }
+
+    #[test]
+    fn default_on_toggles_default_to_true() {
+        let cli = Cli::try_parse_from(["baegun", "convert", "in.pdf"])
+            .expect("plain convert invocation should parse");
+
+        let Commands::Convert(args) = cli.command else {
+            panic!("expected convert subcommand");
+        };
+        assert!(args.options.include_images);
+        assert!(args.options.extract_header);
+        assert!(args.options.extract_footer);
+    }
 
     #[test]
     fn pdf_detection_is_case_insensitive() {

@@ -3,7 +3,11 @@ use crate::models::ValidationResult;
 use std::path::Path;
 use std::process::Command;
 
-pub fn run_epubcheck(epubcheck_bin: &str, epub_path: &Path, fail_on_warn: bool) -> Result<ValidationResult> {
+pub fn run_epubcheck(
+    epubcheck_bin: &str,
+    epub_path: &Path,
+    fail_on_warn: bool,
+) -> Result<ValidationResult> {
     let output = Command::new(epubcheck_bin)
         .arg(epub_path)
         .output()
