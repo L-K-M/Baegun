@@ -8,7 +8,7 @@ have a companion PR; everything else is documented here for future work.
 
 ## Bugs
 
-### 1. CLI boolean options can never be turned off ✅ implemented
+### 1. CLI boolean options can never be turned off ✅ implemented in PR #5
 `--extract-header`, `--extract-footer`, and `--include-images` are declared as
 `bool` fields with `default_value_t = true` in `crates/baegun-cli/src/main.rs`. With
 clap's derive API, a plain `bool` field gets `ArgAction::SetTrue` — so these flags take
@@ -24,7 +24,7 @@ There is no way at all to disable header/footer extraction or body images from t
 Fix: use `ArgAction::Set` with an explicit boolean value (`--include-images false`),
 matching the documented contract.
 
-### 2. Toggling comic mode silently re-buys OCR ✅ implemented
+### 2. Toggling comic mode silently re-buys OCR ✅ implemented in PR #5
 `compute_cache_key` in `crates/baegun-core/src/cache.rs` hashes `cfg.comic_mode` into the
 OCR cache key, but comic mode does not change the OCR request payload in any way
 (`include_image_base64` is always `true`, and the other request fields are unaffected).
@@ -34,13 +34,13 @@ Comic mode is a pure post-processing decision and should not participate in the 
 (Note: fixing this rolls all existing cache keys once, same as any version bump, since
 the key also hashes `CARGO_PKG_VERSION`.)
 
-### 3. Desktop: "Clear Finished" can't clear failed jobs ✅ implemented
+### 3. Desktop: "Clear Finished" can't clear failed jobs ✅ implemented in PR #6
 In `src/routes/+page.svelte`, `clearFinished()` removes both `done` and `error` jobs,
 but the button is `disabled={doneCount === 0}`. If every conversion in the queue failed,
 the button stays disabled and the errored rows can never be cleared (except by removing
 them one by one). The disabled condition should count `done` **and** `error` jobs.
 
-### 4. Desktop: duplicate PDF basenames silently overwrite each other's output ✅ implemented
+### 4. Desktop: duplicate PDF basenames silently overwrite each other's output ✅ implemented in PR #6
 `deriveOutputPath()` maps every queued PDF to `<outputDir>/<basename>.epub`. Queueing
 `a/report.pdf` and `b/report.pdf` (allowed — job identity is the full path) makes the
 second conversion silently overwrite the first EPUB. The conversion loop should
@@ -95,7 +95,7 @@ test-only constructor) from `baegun-core` removes the drift hazard.
 
 ### 5. Doc drift: dependency release-age policy
 `AGENTS.md` documents `min-release-age=3`, but `.npmrc` says `min-release-age=10`.
-*(Fixed alongside the CLI flag PR.)* ✅ implemented
+*(Fixed alongside the CLI flag PR.)* ✅ implemented in PR #5
 
 ### 6. Metadata generation truncation
 The chat request uses `max_tokens: 500`; a long description plus 8 subjects can
@@ -138,7 +138,7 @@ links present in the source PDF are lost in the EPUB.
    already get anchor ids (`add_heading_anchors`), so a two-level ToC is nearly free.
 9. **`dc:date` and series metadata** — publication year is often on the title page /
    in PDF metadata; Calibre-style series tags would delight series readers.
-10. **`--version` for the CLI** — clap only emits it when asked; it isn't enabled. ✅ implemented
+10. **`--version` for the CLI** — clap only emits it when asked; it isn't enabled. ✅ implemented in PR #5
 
 ---
 
