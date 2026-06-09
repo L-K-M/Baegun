@@ -84,6 +84,7 @@
 
   $: pendingCount = jobs.filter((job) => job.status === 'pending').length;
   $: doneCount = jobs.filter((job) => job.status === 'done').length;
+  $: finishedCount = jobs.filter((job) => job.status === 'done' || job.status === 'error').length;
   $: sortedJobs = [...jobs].sort((left, right) => compareJobs(left, right, sortColumn, sortDirection));
   $: missingApiKey = apiKey.trim().length === 0;
   $: missingOutputDir = outputDir.trim().length === 0;
@@ -404,6 +405,14 @@
     stageTotal = 0;
     statusMessage = `Converting ${pending.length} file(s)...`;
 
+    // Seed with outputs already produced in this queue so a re-run cannot
+    // silently overwrite them with a same-named PDF from another folder.
+    const usedOutputs = new Set(
+      jobs
+        .filter((job) => job.outputPath)
+        .map((job) => (job.outputPath as string).toLowerCase())
+    );
+
     for (const job of pending) {
       if (cancelRequested) {
         break;
@@ -413,7 +422,8 @@
       updateJob(job.id, { status: 'running', message: undefined });
       statusMessage = `Converting ${basename(job.path)}...`;
 
-      const outputPath = deriveOutputPath(outputDir.trim(), job.path);
+      const outputPath = deriveOutputPath(outputDir.trim(), job.path, usedOutputs);
+      usedOutputs.add(outputPath.toLowerCase());
 
       const request: ConvertRequest = {
         input_path: job.path,
@@ -487,11 +497,20 @@
     return path.split(/[\\/]/).pop() ?? path;
   }
 
-  function deriveOutputPath(dir: string, inputPath: string): string {
+  function deriveOutputPath(dir: string, inputPath: string, usedOutputs: Set<string>): string {
     const file = basename(inputPath).replace(/\.pdf$/i, '') || 'output';
     const separator = dir.includes('\\') ? '\\' : '/';
     const normalizedDir = dir.replace(/[\\/]+$/, '');
-    return `${normalizedDir}${separator}${file}.epub`;
+
+    // Queued PDFs from different folders can share a basename; suffix instead
+    // of letting the second conversion overwrite the first EPUB.
+    let candidate = `${normalizedDir}${separator}${file}.epub`;
+    let counter = 2;
+    while (usedOutputs.has(candidate.toLowerCase())) {
+      candidate = `${normalizedDir}${separator}${file}-${counter}.epub`;
+      counter += 1;
+    }
+    return candidate;
   }
 
   function sortBy(column: SortColumn) {
@@ -586,7 +605,7 @@
         <div class="panel-header">
           <div class="header-actions">
             <Button onclick={choosePdfFiles}>Add PDFs</Button>
-            <Button onclick={clearFinished} disabled={doneCount === 0}>Clear Finished</Button>
+            <Button onclick={clearFinished} disabled={finishedCount === 0}>Clear Finished</Button>
           </div>
           <Button onclick={openSettingsDialog}>Settings...</Button>
         </div>
