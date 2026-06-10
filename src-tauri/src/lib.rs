@@ -1,4 +1,5 @@
 mod commands;
+mod updates;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -7,7 +8,9 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             commands::convert_pdf,
-            commands::is_directory
+            commands::is_directory,
+            updates::check_self_update,
+            updates::open_release_url
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

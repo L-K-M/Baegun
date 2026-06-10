@@ -292,6 +292,8 @@ name = "baegun-tauri"
 version = "0.2.0"
 dependencies = [
  "baegun-core",
+ "open",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "tauri",

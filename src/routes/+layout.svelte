@@ -1,5 +1,6 @@
 <script>
   import '@lkmc/system7-ui/styles.css';
+  import UpdateNotice from '$lib/components/UpdateNotice.svelte';
 </script>
 
 <style>
@@ -15,3 +16,4 @@
 </style>
 
 <slot />
+<UpdateNotice />
