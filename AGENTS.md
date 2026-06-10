@@ -172,9 +172,10 @@ Frontend imports:
 - `@lkmc/system7-ui/styles.css` in `src/routes/+layout.svelte`
 - Components from `@lkmc/system7-ui` in page/UI components
 
-Dependency source is local sibling repo:
+Dependency source is the npm registry:
 
-- `@lkmc/system7-ui`: `file:../system7-ui`
+- `@lkmc/system7-ui`: `^0.2.1` (published from the `system7-ui` repo; for local
+  library development use `npm link ../system7-ui` or a temporary `file:` override)
 
 Reference apps for style/patterns:
 
