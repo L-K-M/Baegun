@@ -20,10 +20,10 @@ jobs:
     name: Frontend (check & build)
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 20
           cache: npm
@@ -41,15 +41,24 @@ jobs:
         run: npx vite build
 
   rust:
-    name: Rust (fmt, clippy, test)
-    runs-on: ubuntu-22.04
+    name: Rust (fmt, clippy, test, ${{ matrix.platform }})
+    # Baegun ships macOS, Linux and Windows bundles. Linux covers the
+    # cross-platform workspace (and the GTK/webview toolchain); macOS covers
+    # the `#[cfg(target_os = "macos")]` accent color path (objc2-app-kit),
+    # which never compiles on the Linux runner.
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [ubuntu-22.04, macos-latest]
+    runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Tauri's desktop backend (src-tauri) links against the system webview
       # and GTK, so these are required to compile/clippy/test the workspace.
       # Tauri v2 uses the webkit2gtk 4.1 series.
-      - name: Install Tauri system dependencies
+      - name: Install Tauri system dependencies (Linux)
+        if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -64,7 +73,7 @@ jobs:
             librsvg2-dev
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 20
           cache: npm

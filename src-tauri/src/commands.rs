@@ -164,6 +164,11 @@ pub async fn is_directory(path: String) -> Result<bool, String> {
     Ok(PathBuf::from(path).is_dir())
 }
 
+#[tauri::command]
+pub fn get_system_colors() -> Result<crate::system_colors::SystemColors, String> {
+    Ok(crate::system_colors::get_system_colors())
+}
+
 fn resolve_epubcheck_bin(app: &tauri::AppHandle, requested: Option<&str>) -> String {
     let command = requested
         .map(str::trim)

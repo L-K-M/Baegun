@@ -1,4 +1,5 @@
 mod commands;
+mod system_colors;
 mod updates;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -9,6 +10,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::convert_pdf,
             commands::is_directory,
+            commands::get_system_colors,
             updates::check_self_update,
             updates::open_release_url
         ])

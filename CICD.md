@@ -22,8 +22,11 @@ The CI workflow has two parallel jobs:
   `svelte-check` *and* `cargo test --workspace`), so the job calls `npx vite build`
   directly to keep this job to a pure frontend build — the Rust suite is covered by
   the `rust` job.
-- **Rust (fmt, clippy, test)** — installs the Tauri Linux system dependencies
-  (webview + GTK), builds the frontend into `build/` first (because
+- **Rust (fmt, clippy, test)** — runs on a Linux + macOS matrix: Linux covers
+  the cross-platform workspace (after installing the Tauri Linux system
+  dependencies, webview + GTK), while macOS covers the
+  `#[cfg(target_os = "macos")]` accent color path (`objc2-app-kit`), which never
+  compiles on Linux. Each job builds the frontend into `build/` first (because
   `tauri::generate_context!` embeds it at compile time), then runs
   `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
   and `cargo test --workspace`. `Swatinem/rust-cache` caches the cargo build between
