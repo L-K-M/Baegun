@@ -5,7 +5,7 @@ Baegun is a Rust PDF to EPUB converter with two frontends that share the same co
 - `baegun` CLI (Rust binary)
 - `Baegun` desktop app (Tauri)
 
-**Latest release:** v<!-- version -->0.2.0<!-- /version --> · [Download](https://github.com/L-K-M/Baegun/releases/latest)
+**Latest release:** v<!-- version -->1.0.0<!-- /version --> · [Download](https://github.com/L-K-M/Baegun/releases/latest)
 
 The converter uses Mistral OCR to extract structured markdown, images, and tables, then builds chapterized EPUB3 output. The first extracted image from the first PDF page is marked as the EPUB cover image. EPUB metadata is populated from explicit settings, cover/title-page OCR text, PDF metadata, and best-effort Mistral LLM generation from OCR content when needed.
 
