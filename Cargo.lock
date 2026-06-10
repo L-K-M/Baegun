@@ -265,7 +265,7 @@ checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
 name = "baegun-cli"
-version = "0.2.0"
+version = "1.0.0"
 dependencies = [
  "baegun-core",
  "clap",
@@ -273,7 +273,7 @@ dependencies = [
 
 [[package]]
 name = "baegun-core"
-version = "0.2.0"
+version = "1.0.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -289,7 +289,7 @@ dependencies = [
 
 [[package]]
 name = "baegun-tauri"
-version = "0.2.0"
+version = "1.0.0"
 dependencies = [
  "baegun-core",
  "objc2-app-kit",
