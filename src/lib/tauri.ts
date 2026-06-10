@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import type { ConvertProgressEvent, ConvertRequest, ConvertResponse } from './types';
+import type { ConvertProgressEvent, ConvertRequest, ConvertResponse, SystemColors } from './types';
 
 const CONVERT_PROGRESS_EVENT = 'baegun://convert-progress';
 
@@ -19,5 +19,9 @@ export class TauriService {
 
   static async isDirectory(path: string): Promise<boolean> {
     return await invoke('is_directory', { path });
+  }
+
+  static async getSystemColors(): Promise<SystemColors> {
+    return await invoke('get_system_colors');
   }
 }

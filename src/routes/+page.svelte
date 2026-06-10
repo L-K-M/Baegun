@@ -14,11 +14,13 @@
     Notification,
     PdfFileIcon,
     ProgressBar,
+    TextInput,
     TrashIcon,
-    TitleBar
+    TitleBar,
+    getSystem7WindowStyle
   } from '@lkmc/system7-ui';
 
-  import type { ConversionJob, ConvertProgressEvent, ConvertRequest } from '$lib/types';
+  import type { ConversionJob, ConvertProgressEvent, ConvertRequest, SystemColors } from '$lib/types';
   import { TauriService } from '$lib/tauri';
   import { notifications } from '$lib/util/notifications';
   import { WindowManager } from '$lib/windowManager';
@@ -61,6 +63,7 @@
   let validate = false;
 
   let converting = false;
+  let systemColors: SystemColors | null = null;
   let showProgressModal = false;
   let progressCurrent = 0;
   let progressTotal = 1;
@@ -113,6 +116,8 @@
       validate
     });
   }
+
+  $: windowStyle = systemColors ? getSystem7WindowStyle(systemColors) : '';
 
   function handleConvertProgress(progress: ConvertProgressEvent) {
     if (!converting || !activeJobPath) {
@@ -170,6 +175,7 @@
   onMount(() => {
     loadPersistedSettings();
     settingsLoaded = true;
+    void loadSystemColors();
 
     const unlistenFocus = appWindow.onFocusChanged(({ payload }) => {
       windowFocused = payload;
@@ -217,6 +223,14 @@
       unlistenProgress.then((fn) => fn());
     };
   });
+
+  async function loadSystemColors() {
+    try {
+      systemColors = await TauriService.getSystemColors();
+    } catch {
+      systemColors = null;
+    }
+  }
 
   async function choosePdfFiles() {
     const selected = await open({
@@ -581,7 +595,7 @@
   }
 </script>
 
-<div class="window-frame s7-root" class:window-unfocused={!windowFocused}>
+<div class="window-frame s7-root" class:window-unfocused={!windowFocused} style={windowStyle}>
   <TitleBar
     title="Baegun"
     focused={windowFocused}
@@ -593,13 +607,13 @@
     ondragstart={handleWindowDrag}
   />
 
-  <Notification notifications={$notifications} />
-
-  {#if errorMessage}
-    <ErrorBanner message={errorMessage} onclose={() => (errorMessage = '')} />
-  {/if}
-
   {#if !isWindowShaded}
+    <Notification notifications={$notifications} ondismiss={(id) => notifications.remove(id)} />
+
+    {#if errorMessage}
+      <ErrorBanner message={errorMessage} onclose={() => (errorMessage = '')} />
+    {/if}
+
     <main class="app-content">
       <section class="file-panel">
         <div class="panel-header">
@@ -663,7 +677,7 @@
               ondragleave={handleOutputDirectoryDragLeave}
               ondragover={handleOutputDirectoryDragOver}
             >
-              <input type="text" bind:value={outputDir} placeholder="/Users/name/Books" />
+              <TextInput bind:value={outputDir} placeholder="/Users/name/Books" ariaLabel="Output directory" />
               <Button onclick={chooseOutputDirectory}>Choose</Button>
             </div>
           </label>
@@ -699,7 +713,12 @@
         <h3>Settings</h3>
         <label>
           Mistral API key
-          <input type="password" bind:value={apiKey} placeholder="ufuVDexxxxxxxxxxxxxxxxxxxxxxxx" />
+          <TextInput
+            type="password"
+            bind:value={apiKey}
+            clearable
+            placeholder="ufuVDexxxxxxxxxxxxxxxxxxxxxxxx"
+          />
         </label>
         <div class="settings-dialog-meta">
           <p class="settings-dialog-hint">This key is used for OCR requests to Mistral.</p>
@@ -746,6 +765,15 @@
 
 <style>
   .window-frame {
+    /* Monochrome System 7 defaults; the OS accent colors fetched at
+       runtime override these via the inline style. */
+    --system7-color-accent: #000;
+    --system7-color-accent-text: #fff;
+    --system7-color-highlight: #000;
+    --system7-color-highlight-text: #fff;
+    --system7-color-success: #000;
+    --system7-color-error: #000;
+    --system7-color-info: #000;
     width: 100vw;
     height: 100vh;
     background: #fff;
@@ -753,6 +781,12 @@
     box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.2);
     display: flex;
     flex-direction: column;
+  }
+
+  .window-frame :global(.notification.success),
+  .window-frame :global(.notification.error),
+  .window-frame :global(.notification.info) {
+    border-left: 2px solid var(--system7-color-ink, #000);
   }
 
   .app-content {
@@ -800,10 +834,12 @@
     gap: 4px;
   }
 
-  input[type='text'],
-  input[type='password'] {
-    border: 1px solid #000;
-    padding: 6px 8px;
+  label :global(.sys7-text-input-wrap) {
+    width: 100%;
+  }
+
+  label :global(.sys7-text-input) {
+    width: 100%;
   }
 
   .path-row {

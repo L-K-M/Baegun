@@ -61,8 +61,9 @@ export interface ConvertProgressEvent {
   cache_hit?: boolean | null;
 }
 
-export interface NotificationItem {
-  id: number;
-  message: string;
-  type: 'success' | 'error' | 'info';
+export interface SystemColors {
+  accent_color: string | null;
+  accent_text_color: string | null;
+  highlight_color: string | null;
+  highlight_text_color: string | null;
 }
