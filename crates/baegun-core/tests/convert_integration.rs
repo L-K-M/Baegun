@@ -313,7 +313,6 @@ fn compute_cache_key(cfg: &ConvertConfig, pdf_bytes: &[u8]) -> String {
     hasher.update(if cfg.extract_header { b"1" } else { b"0" });
     hasher.update(if cfg.extract_footer { b"1" } else { b"0" });
     hasher.update(b"1");
-    hasher.update(if cfg.comic_mode { b"1" } else { b"0" });
     hasher.update(env!("CARGO_PKG_VERSION").as_bytes());
     format!("{:x}", hasher.finalize())
 }

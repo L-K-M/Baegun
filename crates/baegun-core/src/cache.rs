@@ -13,7 +13,9 @@ pub fn compute_cache_key(cfg: &ConvertConfig, pdf_bytes: &[u8]) -> String {
     hasher.update(if cfg.extract_footer { b"1" } else { b"0" });
     // Image payloads are always requested so the first page image can become the EPUB cover.
     hasher.update(b"1");
-    hasher.update(if cfg.comic_mode { b"1" } else { b"0" });
+    // Comic mode is deliberately NOT part of the key: it only changes local
+    // post-processing, never the OCR request, so toggling it must reuse the
+    // cached payload instead of re-issuing a paid OCR call.
     hasher.update(env!("CARGO_PKG_VERSION").as_bytes());
     format!("{:x}", hasher.finalize())
 }
@@ -123,9 +125,38 @@ pub fn store_cached_metadata(
 
 #[cfg(test)]
 mod tests {
-    use super::{load_cached_metadata, store_cached_metadata};
+    use super::{compute_cache_key, load_cached_metadata, store_cached_metadata};
     use crate::models::{BookMetadata, ConvertConfig, TableFormat};
     use std::path::PathBuf;
+
+    #[test]
+    fn comic_mode_does_not_change_cache_key() {
+        let mut cfg = config_with_cache(PathBuf::from(".cache"), false);
+        let key_without_comic = compute_cache_key(&cfg, b"%PDF-1.4");
+        cfg.comic_mode = true;
+        let key_with_comic = compute_cache_key(&cfg, b"%PDF-1.4");
+
+        assert_eq!(
+            key_without_comic, key_with_comic,
+            "comic mode only affects post-processing and must reuse cached OCR"
+        );
+    }
+
+    #[test]
+    fn ocr_request_options_change_cache_key() {
+        let cfg = config_with_cache(PathBuf::from(".cache"), false);
+        let base_key = compute_cache_key(&cfg, b"%PDF-1.4");
+
+        let mut other = cfg.clone();
+        other.extract_header = false;
+        assert_ne!(base_key, compute_cache_key(&other, b"%PDF-1.4"));
+
+        let mut other = cfg.clone();
+        other.model = "mistral-ocr-2505".to_string();
+        assert_ne!(base_key, compute_cache_key(&other, b"%PDF-1.4"));
+
+        assert_ne!(base_key, compute_cache_key(&cfg, b"%PDF-1.5"));
+    }
 
     fn config_with_cache(cache_dir: PathBuf, no_cache: bool) -> ConvertConfig {
         ConvertConfig {
