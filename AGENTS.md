@@ -123,6 +123,7 @@ Notable options:
 - `-o, --output-dir` (batch)
 - `--recursive` (batch)
 - `--api-key` (fallback `MISTRAL_API_KEY`)
+- `--provider` (default `mistral`; OCR backend, see `docs/ocr-providers.md`)
 - `--model` (default `mistral-ocr-latest`)
 - `--table-format html|markdown`
 - `--extract-header true|false`

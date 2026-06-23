@@ -255,6 +255,7 @@ fn fixture_config(input_pdf: PathBuf, output_epub: PathBuf, cache_dir: PathBuf) 
         input_pdf,
         output_epub,
         api_key: None,
+        provider: baegun_core::OcrBackend::Mistral,
         model: "mistral-ocr-latest".to_string(),
         title: None,
         author: None,
@@ -308,6 +309,7 @@ fn seed_cache_json(cfg: &ConvertConfig, pdf_bytes: &[u8], fixture_json: &str) {
 fn compute_cache_key(cfg: &ConvertConfig, pdf_bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(pdf_bytes);
+    hasher.update(cfg.provider.as_str().as_bytes());
     hasher.update(cfg.model.as_bytes());
     hasher.update(cfg.table_format.as_str().as_bytes());
     hasher.update(if cfg.extract_header { b"1" } else { b"0" });

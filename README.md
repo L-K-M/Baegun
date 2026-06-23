@@ -68,6 +68,7 @@ Common options:
 | `-o, --output-dir PATH` | Output directory (`convert-batch`). Defaults to `INPUT_DIR`. |
 | `--recursive` | Scan nested folders (`convert-batch` only). |
 | `--api-key TEXT` | Mistral API key. Falls back to the `MISTRAL_API_KEY` environment variable. |
+| `--provider TEXT` | OCR provider backend. Default: `mistral`. |
 | `--model TEXT` | Mistral OCR model name. Default: `mistral-ocr-latest`. |
 | `--table-format html\|markdown` | Format for extracted tables in the EPUB. Default: `html`. |
 | `--extract-header true\|false` | Include page headers from OCR. Default: `true`. |

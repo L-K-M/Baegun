@@ -40,11 +40,46 @@ impl FromStr for TableFormat {
     }
 }
 
+/// Selects which OCR backend produces the document payload.
+///
+/// Today only the hosted Mistral OCR API is implemented; the enum exists so
+/// future providers (see `docs/ocr-providers.md`) can be slotted in behind the
+/// `OcrProvider` trait without touching the conversion pipeline.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum OcrBackend {
+    /// Mistral hosted OCR API (`POST /v1/ocr`).
+    #[default]
+    Mistral,
+}
+
+impl OcrBackend {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Mistral => "mistral",
+        }
+    }
+}
+
+impl FromStr for OcrBackend {
+    type Err = String;
+
+    fn from_str(value: &str) -> std::result::Result<Self, Self::Err> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "mistral" => Ok(Self::Mistral),
+            other => Err(format!(
+                "Unsupported OCR provider '{other}'. Expected one of: mistral"
+            )),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConvertConfig {
     pub input_pdf: PathBuf,
     pub output_epub: PathBuf,
     pub api_key: Option<String>,
+    pub provider: OcrBackend,
     pub model: String,
     pub title: Option<String>,
     pub author: Option<String>,

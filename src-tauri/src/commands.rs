@@ -1,5 +1,6 @@
 use baegun_core::{
-    convert_pdf_to_epub_with_progress, ConvertConfig, ConvertProgress, ConvertStage, TableFormat,
+    convert_pdf_to_epub_with_progress, ConvertConfig, ConvertProgress, ConvertStage, OcrBackend,
+    TableFormat,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -14,6 +15,7 @@ pub struct ConvertRequest {
     pub input_path: String,
     pub output_path: Option<String>,
     pub api_key: Option<String>,
+    pub provider: Option<String>,
     pub model: Option<String>,
     pub title: Option<String>,
     pub author: Option<String>,
@@ -80,6 +82,13 @@ pub async fn convert_pdf(
         .parse::<TableFormat>()
         .map_err(|error| format!("Invalid table format: {error}"))?;
 
+    let provider = request
+        .provider
+        .as_deref()
+        .unwrap_or("mistral")
+        .parse::<OcrBackend>()
+        .map_err(|error| format!("Invalid OCR provider: {error}"))?;
+
     let comic_mode = request.comic_mode.unwrap_or(false);
 
     let cache_dir = match request.cache_dir.as_deref().map(str::trim) {
@@ -96,6 +105,7 @@ pub async fn convert_pdf(
         input_pdf: input_path,
         output_epub: output_path,
         api_key,
+        provider,
         model: request
             .model
             .unwrap_or_else(|| String::from("mistral-ocr-latest")),

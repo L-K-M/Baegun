@@ -7,6 +7,7 @@ use std::path::PathBuf;
 pub fn compute_cache_key(cfg: &ConvertConfig, pdf_bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(pdf_bytes);
+    hasher.update(cfg.provider.as_str().as_bytes());
     hasher.update(cfg.model.as_bytes());
     hasher.update(cfg.table_format.as_str().as_bytes());
     hasher.update(if cfg.extract_header { b"1" } else { b"0" });
@@ -126,7 +127,7 @@ pub fn store_cached_metadata(
 #[cfg(test)]
 mod tests {
     use super::{compute_cache_key, load_cached_metadata, store_cached_metadata};
-    use crate::models::{BookMetadata, ConvertConfig, TableFormat};
+    use crate::models::{BookMetadata, ConvertConfig, OcrBackend, TableFormat};
     use std::path::PathBuf;
 
     #[test]
@@ -163,6 +164,7 @@ mod tests {
             input_pdf: PathBuf::from("in.pdf"),
             output_epub: PathBuf::from("out.epub"),
             api_key: None,
+            provider: OcrBackend::Mistral,
             model: "mistral-ocr-latest".to_string(),
             title: None,
             author: None,

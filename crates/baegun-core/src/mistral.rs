@@ -32,6 +32,20 @@ struct ChatMessage {
     content: String,
 }
 
+/// Mistral hosted OCR backend (`POST /v1/ocr`).
+pub(crate) struct MistralProvider;
+
+impl crate::provider::OcrProvider for MistralProvider {
+    fn run(
+        &self,
+        cfg: &ConvertConfig,
+        pdf_bytes: &[u8],
+        source_filename: &str,
+    ) -> Result<MistralOcrResponse> {
+        run_mistral_ocr(cfg, pdf_bytes, source_filename)
+    }
+}
+
 pub fn run_mistral_ocr(
     cfg: &ConvertConfig,
     pdf_bytes: &[u8],

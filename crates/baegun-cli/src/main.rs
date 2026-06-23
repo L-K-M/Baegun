@@ -1,5 +1,6 @@
 use baegun_core::{
-    convert_pdf_to_epub, BaegunError, ConvertConfig, ConvertSummary, ErrorKind, TableFormat,
+    convert_pdf_to_epub, BaegunError, ConvertConfig, ConvertSummary, ErrorKind, OcrBackend,
+    TableFormat,
 };
 use clap::{ArgAction, Args, Parser, Subcommand};
 use std::env;
@@ -52,6 +53,9 @@ struct ConvertBatchArgs {
 struct CommonConvertArgs {
     #[arg(long = "api-key")]
     api_key: Option<String>,
+
+    #[arg(long, default_value = "mistral", help = "OCR provider backend")]
+    provider: String,
 
     #[arg(long, default_value = "mistral-ocr-latest")]
     model: String,
@@ -151,6 +155,12 @@ fn run_convert(args: ConvertArgs) -> Result<(), BaegunError> {
         .parse::<TableFormat>()
         .map_err(BaegunError::bad_args)?;
 
+    let provider = args
+        .options
+        .provider
+        .parse::<OcrBackend>()
+        .map_err(BaegunError::bad_args)?;
+
     let delete_source = args.options.delete_source;
     let input_path = args.input_pdf.clone();
     let cfg = build_config(
@@ -159,6 +169,7 @@ fn run_convert(args: ConvertArgs) -> Result<(), BaegunError> {
         &args.options,
         api_key,
         table_format,
+        provider,
     );
     run_single_conversion(&cfg)?;
 
@@ -209,6 +220,12 @@ fn run_convert_batch(args: ConvertBatchArgs) -> Result<(), BaegunError> {
         .parse::<TableFormat>()
         .map_err(BaegunError::bad_args)?;
 
+    let provider = args
+        .options
+        .provider
+        .parse::<OcrBackend>()
+        .map_err(BaegunError::bad_args)?;
+
     let pdf_files = collect_pdf_files(&args.input_dir, args.recursive)?;
     if pdf_files.is_empty() {
         return Err(BaegunError::bad_args(format!(
@@ -251,6 +268,7 @@ fn run_convert_batch(args: ConvertBatchArgs) -> Result<(), BaegunError> {
             &args.options,
             api_key.clone(),
             table_format,
+            provider,
         );
 
         match run_single_conversion(&cfg) {
@@ -323,11 +341,13 @@ fn build_config(
     options: &CommonConvertArgs,
     api_key: Option<String>,
     table_format: TableFormat,
+    provider: OcrBackend,
 ) -> ConvertConfig {
     ConvertConfig {
         input_pdf,
         output_epub,
         api_key,
+        provider,
         model: options.model.clone(),
         title: options.title.clone(),
         author: options.author.clone(),
