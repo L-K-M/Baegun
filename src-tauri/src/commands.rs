@@ -70,9 +70,16 @@ pub async fn convert_pdf(
         .map(PathBuf::from)
         .unwrap_or_else(|| input_path.with_extension("epub"));
 
+    let provider = request
+        .provider
+        .as_deref()
+        .unwrap_or("mistral")
+        .parse::<OcrBackend>()
+        .map_err(|error| format!("Invalid OCR provider: {error}"))?;
+
     let api_key = request
         .api_key
-        .or_else(|| env::var("MISTRAL_API_KEY").ok())
+        .or_else(|| env::var(provider.api_key_env()).ok())
         .filter(|value| !value.trim().is_empty());
 
     let table_format = request
@@ -81,13 +88,6 @@ pub async fn convert_pdf(
         .unwrap_or("html")
         .parse::<TableFormat>()
         .map_err(|error| format!("Invalid table format: {error}"))?;
-
-    let provider = request
-        .provider
-        .as_deref()
-        .unwrap_or("mistral")
-        .parse::<OcrBackend>()
-        .map_err(|error| format!("Invalid OCR provider: {error}"))?;
 
     let comic_mode = request.comic_mode.unwrap_or(false);
 

@@ -22,5 +22,6 @@ pub trait OcrProvider {
 pub fn provider_for(backend: OcrBackend) -> Box<dyn OcrProvider> {
     match backend {
         OcrBackend::Mistral => Box::new(crate::mistral::MistralProvider),
+        OcrBackend::LlamaParse => Box::new(crate::llamaparse::LlamaParseProvider),
     }
 }

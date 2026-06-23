@@ -1,6 +1,7 @@
 mod cache;
 mod epub;
 mod errors;
+mod llamaparse;
 mod metadata;
 mod mistral;
 mod models;

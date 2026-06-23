@@ -141,11 +141,20 @@ fn run_convert(args: ConvertArgs) -> Result<(), BaegunError> {
         .output
         .unwrap_or_else(|| args.input_pdf.with_extension("epub"));
 
-    let api_key = resolve_api_key(args.options.api_key.clone());
+    let provider = args
+        .options
+        .provider
+        .parse::<OcrBackend>()
+        .map_err(BaegunError::bad_args)?;
+
+    let api_key = resolve_api_key(args.options.api_key.clone(), provider);
     if api_key.is_none() {
         return Err(BaegunError::new(
             ErrorKind::BadArgs,
-            "Missing API key. Pass --api-key or set MISTRAL_API_KEY.",
+            format!(
+                "Missing API key. Pass --api-key or set {}.",
+                provider.api_key_env()
+            ),
         ));
     }
 
@@ -153,12 +162,6 @@ fn run_convert(args: ConvertArgs) -> Result<(), BaegunError> {
         .options
         .table_format
         .parse::<TableFormat>()
-        .map_err(BaegunError::bad_args)?;
-
-    let provider = args
-        .options
-        .provider
-        .parse::<OcrBackend>()
         .map_err(BaegunError::bad_args)?;
 
     let delete_source = args.options.delete_source;
@@ -206,11 +209,20 @@ fn run_convert_batch(args: ConvertBatchArgs) -> Result<(), BaegunError> {
         ))
     })?;
 
-    let api_key = resolve_api_key(args.options.api_key.clone());
+    let provider = args
+        .options
+        .provider
+        .parse::<OcrBackend>()
+        .map_err(BaegunError::bad_args)?;
+
+    let api_key = resolve_api_key(args.options.api_key.clone(), provider);
     if api_key.is_none() {
         return Err(BaegunError::new(
             ErrorKind::BadArgs,
-            "Missing API key. Pass --api-key or set MISTRAL_API_KEY.",
+            format!(
+                "Missing API key. Pass --api-key or set {}.",
+                provider.api_key_env()
+            ),
         ));
     }
 
@@ -218,12 +230,6 @@ fn run_convert_batch(args: ConvertBatchArgs) -> Result<(), BaegunError> {
         .options
         .table_format
         .parse::<TableFormat>()
-        .map_err(BaegunError::bad_args)?;
-
-    let provider = args
-        .options
-        .provider
-        .parse::<OcrBackend>()
         .map_err(BaegunError::bad_args)?;
 
     let pdf_files = collect_pdf_files(&args.input_dir, args.recursive)?;
@@ -370,9 +376,9 @@ fn build_config(
     }
 }
 
-fn resolve_api_key(arg_value: Option<String>) -> Option<String> {
+fn resolve_api_key(arg_value: Option<String>, provider: OcrBackend) -> Option<String> {
     arg_value
-        .or_else(|| env::var("MISTRAL_API_KEY").ok())
+        .or_else(|| env::var(provider.api_key_env()).ok())
         .filter(|value| !value.trim().is_empty())
 }
 

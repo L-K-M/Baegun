@@ -51,12 +51,24 @@ pub enum OcrBackend {
     /// Mistral hosted OCR API (`POST /v1/ocr`).
     #[default]
     Mistral,
+    /// LlamaParse hosted parsing API (LlamaCloud `/api/v1/parsing`).
+    LlamaParse,
 }
 
 impl OcrBackend {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Mistral => "mistral",
+            Self::LlamaParse => "llamaparse",
+        }
+    }
+
+    /// Environment variable consulted for this backend's API key when `--api-key`
+    /// is not passed explicitly.
+    pub const fn api_key_env(self) -> &'static str {
+        match self {
+            Self::Mistral => "MISTRAL_API_KEY",
+            Self::LlamaParse => "LLAMA_CLOUD_API_KEY",
         }
     }
 }
@@ -67,8 +79,9 @@ impl FromStr for OcrBackend {
     fn from_str(value: &str) -> std::result::Result<Self, Self::Err> {
         match value.trim().to_ascii_lowercase().as_str() {
             "mistral" => Ok(Self::Mistral),
+            "llamaparse" | "llama-parse" | "llama_parse" => Ok(Self::LlamaParse),
             other => Err(format!(
-                "Unsupported OCR provider '{other}'. Expected one of: mistral"
+                "Unsupported OCR provider '{other}'. Expected one of: mistral, llamaparse"
             )),
         }
     }
