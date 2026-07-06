@@ -67,8 +67,9 @@ Common options:
 | `-o, --output PATH` | Output EPUB path (single-file `convert`). Defaults to the input path with an `.epub` extension. |
 | `-o, --output-dir PATH` | Output directory (`convert-batch`). Defaults to `INPUT_DIR`. |
 | `--recursive` | Scan nested folders (`convert-batch` only). |
-| `--api-key TEXT` | Mistral API key. Falls back to the `MISTRAL_API_KEY` environment variable. |
-| `--model TEXT` | Mistral OCR model name. Default: `mistral-ocr-latest`. |
+| `--api-key TEXT` | API key for the selected provider. Falls back to the provider's environment variable (`MISTRAL_API_KEY` or `LLAMA_CLOUD_API_KEY`). |
+| `--provider TEXT` | OCR provider backend: `mistral` or `llamaparse`. Default: `mistral`. |
+| `--model TEXT` | Mistral OCR model name (Mistral only). Default: `mistral-ocr-latest`. |
 | `--table-format html\|markdown` | Format for extracted tables in the EPUB. Default: `html`. |
 | `--extract-header true\|false` | Include page headers from OCR. Default: `true`. |
 | `--extract-footer true\|false` | Include page footers from OCR. Default: `true`. |
@@ -86,6 +87,22 @@ Common options:
 | `--verbose` | Print extra diagnostic information during conversion. |
 
 `convert-batch` preserves relative folder structure for recursive runs (for example `input/nested/a.pdf` -> `output/nested/a.epub`).
+
+## OCR Providers
+
+Baegun selects an OCR backend with `--provider`:
+
+- `mistral` (default) — the hosted [Mistral OCR](https://mistral.ai/news/ocr-4/) API. Uses `--api-key` or `MISTRAL_API_KEY`.
+- `llamaparse` — the hosted [LlamaParse](https://www.llamaindex.ai/) API (LlamaCloud parsing). Uses `--api-key` or `LLAMA_CLOUD_API_KEY`. Set `LLAMA_CLOUD_BASE_URL` to target a non-US region (for example `https://api.cloud.eu.llamaindex.ai/api/v1/parsing`).
+
+```bash
+baegun convert ./input.pdf --provider llamaparse --api-key "$LLAMA_CLOUD_API_KEY"
+```
+
+Provider notes:
+
+- With `llamaparse`, tables arrive inline in the page markdown, so `--table-format` has no effect.
+- The EPUB cover image is taken from the first extracted image on the first page. LlamaParse only returns images it extracts from the document, so a text-only first page yields no cover.
 
 ## Desktop App Notes
 

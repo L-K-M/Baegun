@@ -1,5 +1,6 @@
 use baegun_core::{
-    convert_pdf_to_epub, BaegunError, ConvertConfig, ConvertSummary, ErrorKind, TableFormat,
+    convert_pdf_to_epub, BaegunError, ConvertConfig, ConvertSummary, ErrorKind, OcrBackend,
+    TableFormat,
 };
 use clap::{ArgAction, Args, Parser, Subcommand};
 use std::env;
@@ -52,6 +53,9 @@ struct ConvertBatchArgs {
 struct CommonConvertArgs {
     #[arg(long = "api-key")]
     api_key: Option<String>,
+
+    #[arg(long, default_value = "mistral", help = "OCR provider backend")]
+    provider: String,
 
     #[arg(long, default_value = "mistral-ocr-latest")]
     model: String,
@@ -137,11 +141,20 @@ fn run_convert(args: ConvertArgs) -> Result<(), BaegunError> {
         .output
         .unwrap_or_else(|| args.input_pdf.with_extension("epub"));
 
-    let api_key = resolve_api_key(args.options.api_key.clone());
+    let provider = args
+        .options
+        .provider
+        .parse::<OcrBackend>()
+        .map_err(BaegunError::bad_args)?;
+
+    let api_key = resolve_api_key(args.options.api_key.clone(), provider);
     if api_key.is_none() {
         return Err(BaegunError::new(
             ErrorKind::BadArgs,
-            "Missing API key. Pass --api-key or set MISTRAL_API_KEY.",
+            format!(
+                "Missing API key. Pass --api-key or set {}.",
+                provider.api_key_env()
+            ),
         ));
     }
 
@@ -159,6 +172,7 @@ fn run_convert(args: ConvertArgs) -> Result<(), BaegunError> {
         &args.options,
         api_key,
         table_format,
+        provider,
     );
     run_single_conversion(&cfg)?;
 
@@ -195,11 +209,20 @@ fn run_convert_batch(args: ConvertBatchArgs) -> Result<(), BaegunError> {
         ))
     })?;
 
-    let api_key = resolve_api_key(args.options.api_key.clone());
+    let provider = args
+        .options
+        .provider
+        .parse::<OcrBackend>()
+        .map_err(BaegunError::bad_args)?;
+
+    let api_key = resolve_api_key(args.options.api_key.clone(), provider);
     if api_key.is_none() {
         return Err(BaegunError::new(
             ErrorKind::BadArgs,
-            "Missing API key. Pass --api-key or set MISTRAL_API_KEY.",
+            format!(
+                "Missing API key. Pass --api-key or set {}.",
+                provider.api_key_env()
+            ),
         ));
     }
 
@@ -251,6 +274,7 @@ fn run_convert_batch(args: ConvertBatchArgs) -> Result<(), BaegunError> {
             &args.options,
             api_key.clone(),
             table_format,
+            provider,
         );
 
         match run_single_conversion(&cfg) {
@@ -323,11 +347,13 @@ fn build_config(
     options: &CommonConvertArgs,
     api_key: Option<String>,
     table_format: TableFormat,
+    provider: OcrBackend,
 ) -> ConvertConfig {
     ConvertConfig {
         input_pdf,
         output_epub,
         api_key,
+        provider,
         model: options.model.clone(),
         title: options.title.clone(),
         author: options.author.clone(),
@@ -350,9 +376,9 @@ fn build_config(
     }
 }
 
-fn resolve_api_key(arg_value: Option<String>) -> Option<String> {
+fn resolve_api_key(arg_value: Option<String>, provider: OcrBackend) -> Option<String> {
     arg_value
-        .or_else(|| env::var("MISTRAL_API_KEY").ok())
+        .or_else(|| env::var(provider.api_key_env()).ok())
         .filter(|value| !value.trim().is_empty())
 }
 

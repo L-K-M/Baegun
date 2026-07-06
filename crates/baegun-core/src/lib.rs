@@ -1,17 +1,20 @@
 mod cache;
 mod epub;
 mod errors;
+mod llamaparse;
 mod metadata;
 mod mistral;
 mod models;
 mod normalize;
+mod provider;
 mod validate;
 
 pub use errors::{BaegunError, ErrorKind, Result};
 pub use models::{
     BookMetadata, ConvertConfig, ConvertProgress, ConvertStage, ConvertSummary, MistralOcrResponse,
-    OcrImage, OcrPage, OcrTable, TableFormat, ValidationResult,
+    OcrBackend, OcrImage, OcrPage, OcrTable, TableFormat, ValidationResult,
 };
+pub use provider::OcrProvider;
 
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -95,11 +98,11 @@ where
             ConvertStage::Ocr,
             2,
             total_steps,
-            "Uploading PDF and running Mistral OCR",
+            "Uploading PDF and running OCR",
             Some(false),
         );
 
-        let fresh = mistral::run_mistral_ocr(cfg, &pdf_bytes, source_filename)?;
+        let fresh = provider::provider_for(cfg.provider).run(cfg, &pdf_bytes, source_filename)?;
         cache::store_cached_ocr(cfg, &cache_key, &fresh)?;
         (fresh, false)
     };

@@ -101,7 +101,9 @@ Important types:
 
 Key modules:
 
-- `mistral.rs`: file upload + OCR request + retry + cleanup
+- `provider.rs`: `OcrProvider` trait + `provider_for()` backend selector
+- `mistral.rs`: Mistral file upload + OCR request + retry + cleanup (`MistralProvider`)
+- `llamaparse.rs`: LlamaParse upload + job poll + per-page result mapping (`LlamaParseProvider`)
 - `metadata.rs`: PDF metadata extraction + metadata merge + optional LLM enrichment
 - `cache.rs`: `.baegun-cache` SHA256-keyed OCR payload cache
 - `normalize.rs`: placeholder replacement, chapterization, XHTML rendering
@@ -122,8 +124,9 @@ Notable options:
 - `-o, --output`
 - `-o, --output-dir` (batch)
 - `--recursive` (batch)
-- `--api-key` (fallback `MISTRAL_API_KEY`)
-- `--model` (default `mistral-ocr-latest`)
+- `--api-key` (fallback to the provider's env var: `MISTRAL_API_KEY` or `LLAMA_CLOUD_API_KEY`)
+- `--provider` (`mistral` default, or `llamaparse`; OCR backend, see `docs/ocr-providers.md`)
+- `--model` (default `mistral-ocr-latest`; Mistral only)
 - `--table-format html|markdown`
 - `--extract-header true|false`
 - `--extract-footer true|false`
