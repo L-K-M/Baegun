@@ -12,6 +12,8 @@ The converter uses Mistral OCR to extract structured markdown, images, and table
 OCR image payloads are accepted as either raw base64 strings or `data:*;base64,...` data URIs.
 Metadata generation uses the configured Mistral API key and is skipped when enough metadata is already present or no API key is available.
 
+Before cache or Mistral work begins, Baegun rejects an output path that identifies the input file, including noncanonical paths, symlinks, and hard links where the platform supports them. The identity check is repeated before temporary-file creation and immediately before publication. EPUBs are packaged into a securely created temporary file in the destination directory, optional `epubcheck` validation runs against that temporary EPUB, and successful conversion atomically replaces the destination on supported Unix and Windows platforms. Packaging, validation, or publication errors leave an existing destination unchanged and clean up the temporary file.
+
 > [!IMPORTANT]
 > LLM Disclosure: Much of this code base was written with the help of large language models — AI coding agents working from the [`AGENTS.md`](AGENTS.md) implementation handoff, which is kept in sync with the code.
 
@@ -76,7 +78,7 @@ Common options:
 | `--comic` | Comic mode: render each page as a single full-bleed image chapter. Forces image extraction on. |
 | `--cache-dir PATH` | Directory for caching OCR payloads. Default: `.baegun-cache`. |
 | `--no-cache` | Skip the OCR cache; always call the Mistral API. |
-| `--validate` | Run `epubcheck` on the output EPUB after packaging. |
+| `--validate` | Run `epubcheck` on the temporary EPUB after packaging and before atomic publication. |
 | `--epubcheck-bin TEXT` | Path or command name for the epubcheck executable. Default: `epubcheck`. |
 | `--debug-dir PATH` | Write intermediate pipeline artifacts (OCR JSON, markdown, XHTML) to this directory. |
 | `--keep-remote-file` | Do not delete the uploaded PDF from the Mistral files API after OCR. |

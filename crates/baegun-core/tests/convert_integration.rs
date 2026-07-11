@@ -250,6 +250,114 @@ fn cache_miss_without_api_key_returns_bad_args_error() {
     assert!(error.message.contains("Missing API key"));
 }
 
+#[test]
+fn rejects_exact_same_input_and_output_without_changing_source() {
+    let workspace = TestWorkspace::new("same-path");
+    let input_pdf = workspace.path("book.pdf");
+    let pdf_bytes = b"%PDF-1.4\n% Exact identity fixture\n";
+    fs::write(&input_pdf, pdf_bytes).expect("input PDF fixture should be written");
+
+    assert_same_file_rejected(
+        input_pdf.clone(),
+        input_pdf,
+        workspace.path("cache"),
+        pdf_bytes,
+    );
+}
+
+#[test]
+fn rejects_noncanonical_input_alias_without_changing_source() {
+    let workspace = TestWorkspace::new("noncanonical-alias");
+    let input_dir = workspace.path("input");
+    fs::create_dir_all(&input_dir).expect("input directory should be created");
+    let input_pdf = input_dir.join("book.pdf");
+    let output_alias = input_dir.join("..").join("input").join("book.pdf");
+    let pdf_bytes = b"%PDF-1.4\n% Noncanonical identity fixture\n";
+    fs::write(&input_pdf, pdf_bytes).expect("input PDF fixture should be written");
+
+    assert_same_file_rejected(input_pdf, output_alias, workspace.path("cache"), pdf_bytes);
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn rejects_hard_link_output_without_changing_source() {
+    let workspace = TestWorkspace::new("hard-link-alias");
+    let input_pdf = workspace.path("book.pdf");
+    let output_alias = workspace.path("book.epub");
+    let pdf_bytes = b"%PDF-1.4\n% Hard link identity fixture\n";
+    fs::write(&input_pdf, pdf_bytes).expect("input PDF fixture should be written");
+    fs::hard_link(&input_pdf, &output_alias).expect("hard link should be created");
+
+    assert_same_file_rejected(input_pdf, output_alias, workspace.path("cache"), pdf_bytes);
+}
+
+#[cfg(unix)]
+#[test]
+fn rejects_symlink_output_without_changing_source() {
+    use std::os::unix::fs::symlink;
+
+    let workspace = TestWorkspace::new("symlink-alias");
+    let input_pdf = workspace.path("book.pdf");
+    let output_alias = workspace.path("book.epub");
+    let pdf_bytes = b"%PDF-1.4\n% Symlink identity fixture\n";
+    fs::write(&input_pdf, pdf_bytes).expect("input PDF fixture should be written");
+    symlink(&input_pdf, &output_alias).expect("symlink should be created");
+
+    assert_same_file_rejected(input_pdf, output_alias, workspace.path("cache"), pdf_bytes);
+}
+
+#[test]
+fn successful_conversion_atomically_replaces_existing_destination() {
+    let workspace = TestWorkspace::new("replace-existing");
+    let input_pdf = workspace.path("input/book.pdf");
+    let output_epub = workspace.path("output/book.epub");
+    let cache_dir = workspace.path("cache");
+    fs::create_dir_all(input_pdf.parent().expect("input should have a parent"))
+        .expect("input directory should be created");
+    fs::create_dir_all(output_epub.parent().expect("output should have a parent"))
+        .expect("output directory should be created");
+
+    let pdf_bytes = b"%PDF-1.4\n% Atomic replacement fixture\n";
+    let old_destination = b"existing destination bytes";
+    fs::write(&input_pdf, pdf_bytes).expect("input PDF fixture should be written");
+    fs::write(&output_epub, old_destination).expect("existing destination should be written");
+
+    let cfg = fixture_config(input_pdf, output_epub.clone(), cache_dir);
+    seed_cache_from_fixture(&cfg, pdf_bytes);
+    convert_pdf_to_epub(&cfg).expect("cached fixture conversion should succeed");
+
+    assert_ne!(
+        fs::read(&output_epub).expect("replacement EPUB should be readable"),
+        old_destination
+    );
+    ZipArchive::new(File::open(output_epub).expect("replacement EPUB should exist"))
+        .expect("replacement EPUB should be a readable zip archive");
+}
+
+fn assert_same_file_rejected(
+    input_pdf: PathBuf,
+    output_epub: PathBuf,
+    cache_dir: PathBuf,
+    expected_source_bytes: &[u8],
+) {
+    let mut cfg = fixture_config(input_pdf.clone(), output_epub.clone(), cache_dir);
+    cfg.no_cache = true;
+    cfg.api_key = None;
+
+    let error = convert_pdf_to_epub(&cfg)
+        .expect_err("filesystem-identical input and output should be rejected");
+    assert_eq!(error.kind, ErrorKind::BadArgs);
+    assert!(error.message.contains("same filesystem file"));
+    assert_eq!(
+        fs::read(&input_pdf).expect("source should remain readable"),
+        expected_source_bytes
+    );
+    assert_eq!(
+        fs::read(&output_epub).expect("output alias should remain readable"),
+        expected_source_bytes
+    );
+}
+
 fn fixture_config(input_pdf: PathBuf, output_epub: PathBuf, cache_dir: PathBuf) -> ConvertConfig {
     ConvertConfig {
         input_pdf,
