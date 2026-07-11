@@ -94,6 +94,7 @@ Common options:
 - When `Run epubcheck` is enabled, the desktop app resolves `epubcheck` from `PATH`, bundled resources, common Homebrew/MacPorts locations, or `EPUBCHECK_BIN`.
 - `Comic mode` emits one image-first EPUB chapter per source page using OCR image payloads.
 - The queue supports per-file removal, and the conversion progress modal supports canceling the remaining queue after the current file finishes.
+- Desktop completion and cancellation summaries count only files included in the current run, not results retained from earlier runs.
 
 # Development
 
