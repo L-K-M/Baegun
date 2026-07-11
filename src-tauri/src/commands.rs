@@ -1,5 +1,5 @@
 use baegun_core::{
-    convert_pdf_to_epub_with_progress, ConvertConfig, ConvertProgress, ConvertStage, TableFormat,
+    convert_to_epub_with_progress, ConvertConfig, ConvertProgress, ConvertStage, TableFormat,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -58,7 +58,7 @@ pub struct ConvertProgressEvent {
 }
 
 #[tauri::command]
-pub async fn convert_pdf(
+pub async fn convert_book(
     app: tauri::AppHandle,
     request: ConvertRequest,
 ) -> Result<ConvertResponse, String> {
@@ -124,7 +124,7 @@ pub async fn convert_pdf(
     let app_handle = app.clone();
 
     let summary = tauri::async_runtime::spawn_blocking(move || {
-        convert_pdf_to_epub_with_progress(&cfg, |progress: &ConvertProgress| {
+        convert_to_epub_with_progress(&cfg, |progress: &ConvertProgress| {
             let event = ConvertProgressEvent {
                 input_path: progress_input_path.clone(),
                 output_path: progress_output_path.clone(),
@@ -157,6 +157,14 @@ pub async fn convert_pdf(
         validation_warnings,
         validation_errors,
     })
+}
+
+#[tauri::command]
+pub async fn convert_pdf(
+    app: tauri::AppHandle,
+    request: ConvertRequest,
+) -> Result<ConvertResponse, String> {
+    convert_book(app, request).await
 }
 
 #[tauri::command]

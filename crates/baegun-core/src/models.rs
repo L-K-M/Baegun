@@ -4,17 +4,19 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::str::FromStr;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum TableFormat {
+    #[default]
     Html,
     Markdown,
 }
 
-impl Default for TableFormat {
-    fn default() -> Self {
-        Self::Html
-    }
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum SourceFormat {
+    Pdf,
+    Cbz,
 }
 
 impl TableFormat {
@@ -141,6 +143,23 @@ pub struct RenderedBook {
     pub chapters: Vec<RenderedChapter>,
     pub images: Vec<ImageAsset>,
     pub cover_image: Option<String>,
+    pub fixed_layout: bool,
+    pub page_progression_direction: PageProgressionDirection,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PageProgressionDirection {
+    LeftToRight,
+    RightToLeft,
+}
+
+impl PageProgressionDirection {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::LeftToRight => "ltr",
+            Self::RightToLeft => "rtl",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

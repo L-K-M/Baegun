@@ -90,19 +90,21 @@
   $: finishedCount = jobs.filter((job) => job.status === 'done' || job.status === 'error').length;
   $: sortedJobs = [...jobs].sort((left, right) => compareJobs(left, right, sortColumn, sortDirection));
   $: missingApiKey = apiKey.trim().length === 0;
+  $: pendingPdfCount = jobs.filter((job) => job.status === 'pending' && isPdf(job.path)).length;
+  $: pendingPdfNeedsApiKey = missingApiKey && pendingPdfCount > 0;
   $: missingOutputDir = outputDir.trim().length === 0;
-  $: convertDisabled = converting || pendingCount === 0 || missingApiKey || missingOutputDir;
+  $: convertDisabled = converting || pendingCount === 0 || pendingPdfNeedsApiKey || missingOutputDir;
   $: openTargetDisabled = doneCount === 0 || missingOutputDir;
   $: convertDisabledMessage = [
-    missingApiKey ? 'Set the API key in Settings first.' : '',
+    pendingPdfNeedsApiKey ? 'Set the API key in Settings for pending PDFs.' : '',
     missingOutputDir ? 'Choose an output directory first.' : '',
-    !missingApiKey && !missingOutputDir && pendingCount === 0 ? 'Add at least one PDF first.' : ''
+    !pendingPdfNeedsApiKey && !missingOutputDir && pendingCount === 0 ? 'Add at least one book first.' : ''
   ]
     .filter(Boolean)
     .join('\n');
   $: openTargetDisabledMessage = [
     missingOutputDir ? 'Choose an output directory first.' : '',
-    !missingOutputDir && doneCount === 0 ? 'Convert at least one PDF first.' : ''
+    !missingOutputDir && doneCount === 0 ? 'Convert at least one book first.' : ''
   ]
     .filter(Boolean)
     .join('\n');
@@ -232,10 +234,10 @@
     }
   }
 
-  async function choosePdfFiles() {
+  async function chooseBookFiles() {
     const selected = await open({
       multiple: true,
-      filters: [{ name: 'PDF', extensions: ['pdf'] }]
+      filters: [{ name: 'Books', extensions: ['pdf', 'cbz'] }]
     });
     addPaths(normalizeSelection(selected));
   }
@@ -332,7 +334,7 @@
     let added = 0;
 
     for (const path of paths) {
-      if (!/\.pdf$/i.test(path)) {
+      if (!/\.(pdf|cbz)$/i.test(path)) {
         continue;
       }
       if (existing.has(path)) {
@@ -352,7 +354,7 @@
     }
 
     if (added > 0) {
-      notifications.add(`Added ${added} PDF(s) to queue.`, 'info');
+      notifications.add(`Added ${added} book(s) to queue.`, 'info');
     }
   }
 
@@ -393,8 +395,8 @@
       return;
     }
 
-    if (missingApiKey) {
-      errorMessage = 'Missing API key. Open Settings and enter your Mistral key.';
+    if (pendingPdfNeedsApiKey) {
+      errorMessage = 'Missing API key. Pending PDFs require a Mistral key; CBZ files do not.';
       return;
     }
 
@@ -420,7 +422,7 @@
     statusMessage = `Converting ${pending.length} file(s)...`;
 
     // Seed with outputs already produced in this queue so a re-run cannot
-    // silently overwrite them with a same-named PDF from another folder.
+    // silently overwrite them with a same-named book from another folder.
     const usedOutputs = new Set(
       jobs
         .filter((job) => job.outputPath)
@@ -444,15 +446,15 @@
         output_path: outputPath,
         api_key: apiKey,
         language: 'en',
-        include_images: includeImages || comicMode,
-        comic_mode: comicMode,
+        include_images: isPdf(job.path) ? includeImages || comicMode : true,
+        comic_mode: isPdf(job.path) && comicMode,
         validate,
         quiet: true,
         verbose: false
       };
 
       try {
-        const result = await TauriService.convertPdf(request);
+        const result = await TauriService.convertBook(request);
         updateJob(job.id, {
           status: 'done',
           outputPath: result.output_path,
@@ -511,12 +513,16 @@
     return path.split(/[\\/]/).pop() ?? path;
   }
 
+  function isPdf(path: string): boolean {
+    return /\.pdf$/i.test(path);
+  }
+
   function deriveOutputPath(dir: string, inputPath: string, usedOutputs: Set<string>): string {
-    const file = basename(inputPath).replace(/\.pdf$/i, '') || 'output';
+    const file = basename(inputPath).replace(/\.(pdf|cbz)$/i, '') || 'output';
     const separator = dir.includes('\\') ? '\\' : '/';
     const normalizedDir = dir.replace(/[\\/]+$/, '');
 
-    // Queued PDFs from different folders can share a basename; suffix instead
+    // Queued books from different folders can share a basename; suffix instead
     // of letting the second conversion overwrite the first EPUB.
     let candidate = `${normalizedDir}${separator}${file}.epub`;
     let counter = 2;
@@ -618,7 +624,7 @@
       <section class="file-panel">
         <div class="panel-header">
           <div class="header-actions">
-            <Button onclick={choosePdfFiles}>Add PDFs</Button>
+            <Button onclick={chooseBookFiles}>Add Books</Button>
             <Button onclick={clearFinished} disabled={finishedCount === 0}>Clear Finished</Button>
           </div>
           <Button onclick={openSettingsDialog}>Settings...</Button>
@@ -631,7 +637,7 @@
             sortDirection={sortDirection}
             onSort={handleTableSort}
             empty={jobs.length === 0}
-            emptyText="Drop PDFs into this table, or click Add PDFs."
+            emptyText="Drop PDF or CBZ books into this table, or click Add Books."
             emptyColspan={5}
             bodyClass={isDropActive ? 'drop-active' : ''}
           >
@@ -721,7 +727,7 @@
           />
         </label>
         <div class="settings-dialog-meta">
-          <p class="settings-dialog-hint">This key is used for OCR requests to Mistral.</p>
+          <p class="settings-dialog-hint">This key is used for PDF OCR requests to Mistral. CBZ conversion is local.</p>
           <button type="button" class="settings-link" onclick={openMistralApiKeysPage}>
             Open Mistral API keys ->
           </button>
@@ -733,7 +739,7 @@
             label="Include images"
             onchange={(checked: boolean) => (includeImages = checked)}
           />
-          <Checkbox checked={comicMode} label="Comic mode" onchange={handleComicModeChange} />
+          <Checkbox checked={comicMode} label="PDF comic mode" onchange={handleComicModeChange} />
           <Checkbox checked={validate} label="Run epubcheck" onchange={(checked: boolean) => (validate = checked)} />
         </div>
         <div class="settings-dialog-actions">

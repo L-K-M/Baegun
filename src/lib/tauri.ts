@@ -5,6 +5,10 @@ import type { ConvertProgressEvent, ConvertRequest, ConvertResponse, SystemColor
 const CONVERT_PROGRESS_EVENT = 'baegun://convert-progress';
 
 export class TauriService {
+  static async convertBook(request: ConvertRequest): Promise<ConvertResponse> {
+    return await invoke('convert_book', { request });
+  }
+
   static async convertPdf(request: ConvertRequest): Promise<ConvertResponse> {
     return await invoke('convert_pdf', { request });
   }
