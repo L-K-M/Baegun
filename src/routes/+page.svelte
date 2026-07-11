@@ -410,6 +410,7 @@
       notifications.add('Queue is empty.', 'info');
       return;
     }
+    const runJobIds = new Set(pending.map((job) => job.id));
 
     converting = true;
     cancelRequested = false;
@@ -475,9 +476,10 @@
     }
 
     const canceled = cancelRequested;
-    const pendingRemaining = jobs.filter((job) => job.status === 'pending').length;
-    const failures = jobs.filter((job) => job.status === 'error').length;
-    const successes = jobs.filter((job) => job.status === 'done').length;
+    const runJobs = jobs.filter((job) => runJobIds.has(job.id));
+    const pendingRemaining = runJobs.filter((job) => job.status === 'pending').length;
+    const failures = runJobs.filter((job) => job.status === 'error').length;
+    const successes = runJobs.filter((job) => job.status === 'done').length;
 
     if (canceled) {
       if (failures > 0) {

@@ -101,6 +101,7 @@ CBZ archives are read in place without extraction. Baegun rejects encrypted entr
 - When `Run epubcheck` is enabled, the desktop app resolves `epubcheck` from `PATH`, bundled resources, common Homebrew/MacPorts locations, or `EPUBCHECK_BIN`.
 - `PDF comic mode` emits one image-first EPUB chapter per PDF page using OCR image payloads. CBZ always emits fixed-layout image pages.
 - The queue supports per-file removal, and the conversion progress modal supports canceling the remaining queue after the current file finishes.
+- Desktop completion and cancellation summaries count only files included in the current run, not results retained from earlier runs.
 
 # Development
 
