@@ -21,22 +21,23 @@ its relevant items below.
   release path.
 - PR #13: desktop completion/cancellation summaries scoped to the current run.
 - PR #15: repository-wide Rust formatting and current-stable Clippy baseline restored.
+- PR #16: source/output filesystem identity protection and staged, validated, atomic
+  EPUB publication with failure preservation.
 - PR #9: full historical review in `sol.md` with evidence and naming analysis.
 
 Known limitations of the first CBZ slice remain active below: memory streaming,
 additional image compatibility profiles, richer ComicInfo metadata, user controls,
-inspection/contact sheets, cancellation, atomic output, and reader/epubcheck smoke
+inspection/contact sheets, cancellation, and reader/epubcheck smoke
 coverage.
 
 ## Recommended Sequence
 
 ### P0: Data Safety and Trust Boundaries
 
-1. Prevent source/output aliasing and package atomically.
-2. Sanitize OCR-derived content into valid, inert XHTML.
-3. Move the Mistral API key out of WebView storage and narrow Tauri IPC authority.
-4. Surface and retry remote upload cleanup failures.
-5. Make cache/debug storage private, atomic, bounded, and manageable.
+1. Sanitize OCR-derived content into valid, inert XHTML.
+2. Move the Mistral API key out of WebView storage and narrow Tauri IPC authority.
+3. Surface and retry remote upload cleanup failures.
+4. Make cache/debug storage private, atomic, bounded, and manageable.
 
 ### P1: Correctness and Responsiveness
 
@@ -56,31 +57,6 @@ coverage.
 5. Add cache tools, reader actions, privacy receipts, and test/benchmark coverage.
 
 ## Core Conversion Safety
-
-### Atomic Output and Source Identity
-
-Severity: Critical
-
-References: `crates/baegun-core/src/lib.rs`,
-`crates/baegun-core/src/epub.rs`, `crates/baegun-cli/src/main.rs`
-
-An explicitly chosen output can identify the source through an equal path,
-relative/absolute alias, symlink, or hard link. The EPUB writer currently truncates
-the destination before packaging succeeds. `--delete-source` makes the same-file
-case especially destructive. Existing valid EPUBs are also lost after a mid-write
-or validation failure.
-
-Required behavior:
-
-- Reject source/output filesystem identity, not only equal strings.
-- Define no-clobber, replace, skip, and auto-rename policy explicitly.
-- Create a private temporary file in the destination directory.
-- Finish packaging and required validation before atomic replacement.
-- Preserve an existing destination after every failure/cancellation path.
-- Delete a source only after a distinct output has been durably committed.
-
-Tests: equal paths, aliases, symlink/hard-link identity, existing destination,
-injected writer failure, disk full, validation failure, and cancellation.
 
 ### EPUB XHTML Parsing and Sanitization
 
