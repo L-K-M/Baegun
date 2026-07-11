@@ -84,16 +84,35 @@ pub async fn check_self_update() -> Result<Option<UpdateInfo>, String> {
     }
 }
 
-/// Opens a release page in the user's default browser. Restricted to http(s) so the
-/// frontend can only ever hand it a web link. Bundled here so this update feature is a
-/// self-contained drop-in (no dependency on the app's own URL-opener command).
+/// Opens this project's GitHub release page in the user's default browser.
 #[tauri::command]
 pub fn open_release_url(url: String) -> Result<(), String> {
-    let lower = url.to_lowercase();
-    if !(lower.starts_with("https://") || lower.starts_with("http://")) {
-        return Err("Only http(s) URLs may be opened".to_string());
+    if !is_allowed_release_url(&url) {
+        return Err("Only Baegun's HTTPS GitHub release pages may be opened".to_string());
     }
     open::that(&url).map_err(|e| e.to_string()).map(|_| ())
+}
+
+fn is_allowed_release_url(value: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(value) else {
+        return false;
+    };
+
+    if url.scheme() != "https"
+        || url.host_str() != Some("github.com")
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.port().is_some()
+    {
+        return false;
+    }
+
+    let release_root = format!("/{OWNER}/{REPO}/releases");
+    url.path() == release_root
+        || url
+            .path()
+            .strip_prefix(&release_root)
+            .is_some_and(|suffix| suffix.starts_with('/'))
 }
 
 /// Drops a leading `v`/`V` (Git tags) leaving the bare version.
@@ -128,7 +147,7 @@ fn is_newer(latest: &str, current: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::is_newer;
+    use super::{is_allowed_release_url, is_newer};
 
     #[test]
     fn compares_versions_numerically() {
@@ -138,5 +157,31 @@ mod tests {
         assert!(!is_newer("1.2", "1.2.0")); // equal
         assert!(!is_newer("1.0.0", "1.0.0"));
         assert!(!is_newer("0.9.0", "1.0.0"));
+    }
+
+    #[test]
+    fn allows_only_project_github_release_urls() {
+        assert!(is_allowed_release_url(
+            "https://github.com/L-K-M/Baegun/releases/latest"
+        ));
+        assert!(is_allowed_release_url(
+            "https://github.com/L-K-M/Baegun/releases/tag/v1.0.0"
+        ));
+
+        assert!(!is_allowed_release_url(
+            "http://github.com/L-K-M/Baegun/releases/latest"
+        ));
+        assert!(!is_allowed_release_url(
+            "https://github.example/L-K-M/Baegun/releases/latest"
+        ));
+        assert!(!is_allowed_release_url(
+            "https://github.com/L-K-M/Baegun/releases-archive/latest"
+        ));
+        assert!(!is_allowed_release_url(
+            "https://github.com/another/project/releases/latest"
+        ));
+        assert!(!is_allowed_release_url(
+            "https://github.com:8443/L-K-M/Baegun/releases/latest"
+        ));
     }
 }
