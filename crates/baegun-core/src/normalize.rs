@@ -1,7 +1,7 @@
 use crate::errors::{BaegunError, Result};
 use crate::models::{
-    BookMetadata, ConvertConfig, ImageAsset, MistralOcrResponse, OcrPage, OcrTable, RenderedBook,
-    RenderedChapter, TableFormat,
+    BookMetadata, ConvertConfig, ImageAsset, MistralOcrResponse, OcrPage, OcrTable,
+    PageProgressionDirection, RenderedBook, RenderedChapter, TableFormat,
 };
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
@@ -102,6 +102,8 @@ pub fn normalize_to_rendered_book(
         chapters,
         images: extracted_images.images,
         cover_image: extracted_images.cover_image,
+        fixed_layout: false,
+        page_progression_direction: PageProgressionDirection::LeftToRight,
     })
 }
 
@@ -167,6 +169,8 @@ fn normalize_comic_to_rendered_book(
         chapters,
         images: extracted_images.images,
         cover_image: extracted_images.cover_image,
+        fixed_layout: false,
+        page_progression_direction: PageProgressionDirection::LeftToRight,
     })
 }
 

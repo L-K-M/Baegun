@@ -56,7 +56,7 @@ fn write_epub(book: &RenderedBook, file: &mut File) -> Result<()> {
     zip.write_all(build_content_opf(book).as_bytes())
         .map_err(io_error("OEBPS/content.opf"))?;
 
-    if let Some(cover_image) = &book.cover_image {
+    if let Some(cover_image) = book.cover_image.as_ref().filter(|_| !book.fixed_layout) {
         zip.start_file("OEBPS/text/cover.xhtml", deflated)
             .map_err(zip_error("OEBPS/text/cover.xhtml"))?;
         zip.write_all(build_cover_xhtml(book, cover_image).as_bytes())
@@ -73,7 +73,15 @@ fn write_epub(book: &RenderedBook, file: &mut File) -> Result<()> {
 
     for image in &book.images {
         let zip_path = format!("OEBPS/images/{}", image.file_name);
-        zip.start_file(&zip_path, deflated)
+        let options = if matches!(
+            image.media_type.as_str(),
+            "image/jpeg" | "image/png" | "image/gif" | "image/webp"
+        ) {
+            stored
+        } else {
+            deflated
+        };
+        zip.start_file(&zip_path, options)
             .map_err(zip_error(&zip_path))?;
         zip.write_all(&image.bytes).map_err(io_error(&zip_path))?;
     }
@@ -105,10 +113,20 @@ fn build_nav_xhtml(book: &RenderedBook) -> String {
         ));
     }
 
+    let page_list = if book.fixed_layout {
+        format!(
+            "    <nav epub:type=\"page-list\" id=\"page-list\">\n      <h2>Pages</h2>\n      <ol>\n{}      </ol>\n    </nav>\n",
+            items
+        )
+    } else {
+        String::new()
+    };
+
     format!(
-        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<!DOCTYPE html>\n<html xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:epub=\"http://www.idpf.org/2007/ops\" xml:lang=\"{}\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <title>Contents</title>\n    <link rel=\"stylesheet\" type=\"text/css\" href=\"styles/book.css\" />\n  </head>\n  <body>\n    <nav epub:type=\"toc\" id=\"toc\">\n      <h1>Contents</h1>\n      <ol>\n{}      </ol>\n    </nav>\n  </body>\n</html>\n",
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<!DOCTYPE html>\n<html xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:epub=\"http://www.idpf.org/2007/ops\" xml:lang=\"{}\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <title>Contents</title>\n    <link rel=\"stylesheet\" type=\"text/css\" href=\"styles/book.css\" />\n  </head>\n  <body>\n    <nav epub:type=\"toc\" id=\"toc\">\n      <h1>Contents</h1>\n      <ol>\n{}      </ol>\n    </nav>\n{}  </body>\n</html>\n",
         xml_escape(&book.language),
-        items
+        items,
+        page_list,
     )
 }
 
@@ -128,7 +146,7 @@ fn build_content_opf(book: &RenderedBook) -> String {
     );
     let mut spine = String::new();
 
-    if book.cover_image.is_some() {
+    if book.cover_image.is_some() && !book.fixed_layout {
         manifest.push_str(
             "    <item id=\"cover\" href=\"text/cover.xhtml\" media-type=\"application/xhtml+xml\"/>\n",
         );
@@ -195,9 +213,30 @@ fn build_content_opf(book: &RenderedBook) -> String {
         "    <meta property=\"dcterms:modified\">{}</meta>\n",
         current_utc_timestamp()
     );
+    let rendition_meta = if book.fixed_layout {
+        String::from(
+            "    <meta property=\"rendition:layout\">pre-paginated</meta>\n    <meta property=\"rendition:orientation\">auto</meta>\n    <meta property=\"rendition:spread\">none</meta>\n",
+        )
+    } else {
+        String::new()
+    };
+    let package_prefix = if book.fixed_layout {
+        " prefix=\"rendition: http://www.idpf.org/vocab/rendition/#\""
+    } else {
+        ""
+    };
+    let spine_direction = if book.fixed_layout {
+        format!(
+            " page-progression-direction=\"{}\"",
+            book.page_progression_direction.as_str()
+        )
+    } else {
+        String::new()
+    };
 
     format!(
-        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<package xmlns=\"http://www.idpf.org/2007/opf\" unique-identifier=\"bookid\" version=\"3.0\">\n  <metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\">\n    <dc:identifier id=\"bookid\">urn:sha256:{}</dc:identifier>\n    <dc:title>{}</dc:title>\n{}    <dc:language>{}</dc:language>\n{}{}{}{}  </metadata>\n  <manifest>\n{}  </manifest>\n  <spine>\n{}  </spine>\n</package>\n",
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<package xmlns=\"http://www.idpf.org/2007/opf\" unique-identifier=\"bookid\" version=\"3.0\"{}>\n  <metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\">\n    <dc:identifier id=\"bookid\">urn:sha256:{}</dc:identifier>\n    <dc:title>{}</dc:title>\n{}    <dc:language>{}</dc:language>\n{}{}{}{}{}  </metadata>\n  <manifest>\n{}  </manifest>\n  <spine{}>\n{}  </spine>\n</package>\n",
+        package_prefix,
         xml_escape(&book.source_hash),
         xml_escape(&book.title),
         author_meta,
@@ -206,7 +245,9 @@ fn build_content_opf(book: &RenderedBook) -> String {
         description_meta,
         subject_meta,
         modified_meta,
+        rendition_meta,
         manifest,
+        spine_direction,
         spine,
     )
 }
@@ -256,20 +297,28 @@ body.cover-page {
   height: auto;
 }
 
-body.comic-page {
+.fixed-layout,
+.fixed-layout body.comic-page {
   margin: 0;
   padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
 }
 
 .comic-frame {
   margin: 0;
   padding: 0;
+  width: 100%;
+  height: 100%;
 }
 
 .comic-frame img {
   display: block;
   width: 100%;
-  height: auto;
+  height: 100%;
+  max-width: none;
+  object-fit: contain;
 }
 
 table {
@@ -314,7 +363,7 @@ fn io_error(path: &str) -> impl Fn(std::io::Error) -> BaegunError + '_ {
 mod tests {
     use super::{build_content_opf, package_and_publish};
     use crate::errors::{BaegunError, ErrorKind, Result};
-    use crate::models::{RenderedBook, RenderedChapter};
+    use crate::models::{PageProgressionDirection, RenderedBook, RenderedChapter};
     use crate::output::{ensure_destination_is_distinct, open_source_distinct_from_destination};
     use std::ffi::OsString;
     use std::fs::{self, File};
@@ -339,6 +388,8 @@ mod tests {
             }],
             images: Vec::new(),
             cover_image: None,
+            fixed_layout: false,
+            page_progression_direction: PageProgressionDirection::LeftToRight,
         }
     }
 

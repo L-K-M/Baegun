@@ -1,4 +1,5 @@
 mod cache;
+mod cbz;
 mod epub;
 mod errors;
 mod metadata;
@@ -11,12 +12,92 @@ mod validate;
 pub use errors::{BaegunError, ErrorKind, Result};
 pub use models::{
     BookMetadata, ConvertConfig, ConvertProgress, ConvertStage, ConvertSummary, MistralOcrResponse,
-    OcrImage, OcrPage, OcrTable, TableFormat, ValidationResult,
+    OcrImage, OcrPage, OcrTable, PageProgressionDirection, SourceFormat, TableFormat,
+    ValidationResult,
 };
 
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Read;
+use std::path::Path;
+
+pub fn detect_source_format(path: &Path) -> Result<SourceFormat> {
+    if !path.exists() {
+        return Err(BaegunError::bad_args(format!(
+            "Input file does not exist: {}",
+            path.display()
+        )));
+    }
+    if !path.is_file() {
+        return Err(BaegunError::bad_args(format!(
+            "Input path is not a file: {}",
+            path.display()
+        )));
+    }
+
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(str::to_ascii_lowercase)
+        .ok_or_else(|| BaegunError::bad_args("Input must have a .pdf or .cbz extension."))?;
+    let expected = match extension.as_str() {
+        "pdf" => SourceFormat::Pdf,
+        "cbz" => SourceFormat::Cbz,
+        _ => {
+            return Err(BaegunError::bad_args(format!(
+                "Unsupported input extension '.{extension}'; expected .pdf or .cbz."
+            )))
+        }
+    };
+
+    let mut file = fs::File::open(path).map_err(|error| {
+        BaegunError::bad_args(format!(
+            "Failed opening input '{}': {error}",
+            path.display()
+        ))
+    })?;
+    let mut signature = [0_u8; 8];
+    let read = file.read(&mut signature).map_err(|error| {
+        BaegunError::bad_args(format!(
+            "Failed reading input '{}': {error}",
+            path.display()
+        ))
+    })?;
+    let signature = &signature[..read];
+    let valid = match expected {
+        SourceFormat::Pdf => signature.starts_with(b"%PDF-"),
+        SourceFormat::Cbz => {
+            signature.starts_with(b"PK\x03\x04")
+                || signature.starts_with(b"PK\x05\x06")
+                || signature.starts_with(b"PK\x07\x08")
+        }
+    };
+    if !valid {
+        return Err(BaegunError::bad_args(format!(
+            "Input '{}' does not have a valid {} signature.",
+            path.display(),
+            extension.to_ascii_uppercase()
+        )));
+    }
+    Ok(expected)
+}
+
+pub fn convert_to_epub(cfg: &ConvertConfig) -> Result<ConvertSummary> {
+    convert_to_epub_with_progress(cfg, |_| {})
+}
+
+pub fn convert_to_epub_with_progress<F>(
+    cfg: &ConvertConfig,
+    on_progress: F,
+) -> Result<ConvertSummary>
+where
+    F: FnMut(&ConvertProgress),
+{
+    match detect_source_format(&cfg.input_pdf)? {
+        SourceFormat::Pdf => convert_pdf_impl(cfg, on_progress),
+        SourceFormat::Cbz => convert_cbz_impl(cfg, on_progress),
+    }
+}
 
 pub fn convert_pdf_to_epub(cfg: &ConvertConfig) -> Result<ConvertSummary> {
     convert_pdf_to_epub_with_progress(cfg, |_| {})
@@ -24,8 +105,20 @@ pub fn convert_pdf_to_epub(cfg: &ConvertConfig) -> Result<ConvertSummary> {
 
 pub fn convert_pdf_to_epub_with_progress<F>(
     cfg: &ConvertConfig,
-    mut on_progress: F,
+    on_progress: F,
 ) -> Result<ConvertSummary>
+where
+    F: FnMut(&ConvertProgress),
+{
+    if detect_source_format(&cfg.input_pdf)? != SourceFormat::Pdf {
+        return Err(BaegunError::bad_args(
+            "convert_pdf_to_epub requires a PDF input.",
+        ));
+    }
+    convert_pdf_impl(cfg, on_progress)
+}
+
+fn convert_pdf_impl<F>(cfg: &ConvertConfig, mut on_progress: F) -> Result<ConvertSummary>
 where
     F: FnMut(&ConvertProgress),
 {
@@ -206,6 +299,77 @@ where
         Some(cache_hit),
     );
 
+    Ok(summary)
+}
+
+fn convert_cbz_impl<F>(cfg: &ConvertConfig, mut on_progress: F) -> Result<ConvertSummary>
+where
+    F: FnMut(&ConvertProgress),
+{
+    let total_steps = if cfg.validate { 5 } else { 4 };
+    emit_progress(
+        &mut on_progress,
+        ConvertStage::ReadingInput,
+        1,
+        total_steps,
+        "Reading CBZ archive",
+        Some(false),
+    );
+    emit_progress(
+        &mut on_progress,
+        ConvertStage::Normalize,
+        2,
+        total_steps,
+        "Validating and ordering local CBZ pages",
+        Some(false),
+    );
+    let (rendered, pages_processed) = cbz::load_cbz(cfg)?;
+
+    emit_progress(
+        &mut on_progress,
+        ConvertStage::PackageEpub,
+        3,
+        total_steps,
+        "Packaging fixed-layout EPUB",
+        Some(false),
+    );
+    let validation = epub::package_and_publish(
+        &rendered,
+        &cfg.output_epub,
+        |temporary_path| {
+            if cfg.validate {
+                emit_progress(
+                    &mut on_progress,
+                    ConvertStage::Validate,
+                    4,
+                    total_steps,
+                    "Running epubcheck validation",
+                    Some(false),
+                );
+                validate::run_epubcheck(&cfg.epubcheck_bin, temporary_path, cfg.fail_on_warn)
+                    .map(Some)
+            } else {
+                Ok(None)
+            }
+        },
+        || Ok(()),
+    )?;
+    let summary = ConvertSummary {
+        output_path: cfg.output_epub.clone(),
+        pages_processed,
+        chapters: rendered.chapters.len(),
+        images: rendered.images.len(),
+        cache_hit: false,
+        validation,
+    };
+    emit_progress(
+        &mut on_progress,
+        ConvertStage::Complete,
+        total_steps,
+        total_steps,
+        "Conversion complete",
+        Some(false),
+    );
     Ok(summary)
 }
 

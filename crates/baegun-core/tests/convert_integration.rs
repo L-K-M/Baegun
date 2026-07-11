@@ -1,15 +1,16 @@
 use baegun_core::{
-    convert_pdf_to_epub, convert_pdf_to_epub_with_progress, ConvertConfig, ConvertStage, ErrorKind,
-    TableFormat,
+    convert_pdf_to_epub, convert_pdf_to_epub_with_progress, convert_to_epub,
+    convert_to_epub_with_progress, ConvertConfig, ConvertStage, ErrorKind, TableFormat,
 };
 use sha2::{Digest, Sha256};
 use std::env;
 use std::fs::{self, File};
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::process;
 use std::time::{SystemTime, UNIX_EPOCH};
-use zip::ZipArchive;
+use zip::write::FileOptions;
+use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 struct TestWorkspace {
     root: PathBuf,
@@ -358,6 +359,153 @@ fn assert_same_file_rejected(
     );
 }
 
+#[test]
+fn converts_cbz_to_fixed_layout_epub_without_ocr() {
+    let workspace = TestWorkspace::new("cbz-conversion");
+    let input_cbz = workspace.path("input/book.cbz");
+    let output_epub = workspace.path("output/book.epub");
+    let cache_dir = workspace.path("cache");
+    fs::create_dir_all(input_cbz.parent().expect("input parent should exist"))
+        .expect("input directory should be created");
+
+    let page_two = png_with_text("page", "TWO");
+    let page_ten = png_with_text("page", "TEN");
+    write_cbz(
+        &input_cbz,
+        &[
+            (
+                "ComicInfo.xml",
+                br#"<ComicInfo><Title>Archive Title</Title><Writer>Archive Writer</Writer><Publisher>Archive Press</Publisher><Summary>Archive summary</Summary><LanguageISO>ja</LanguageISO><Manga>YesAndRightToLeft</Manga><Pages><Page Image="0" Type="Story"/><Page Image="1" Type="FrontCover"/></Pages></ComicInfo>"#,
+            ),
+            ("pages/10.bin", &page_ten),
+            ("pages/2.png", &page_two),
+            ("__MACOSX/._2.png", b"ignored resource fork"),
+        ],
+    );
+    let source_hash = format!(
+        "{:x}",
+        Sha256::digest(fs::read(&input_cbz).expect("CBZ source should be readable"))
+    );
+
+    let mut cfg = fixture_config(input_cbz, output_epub.clone(), cache_dir);
+    cfg.title = Some("Explicit Title".to_string());
+    cfg.api_key = None;
+    let mut progress = Vec::new();
+    let summary = convert_to_epub_with_progress(&cfg, |event| {
+        progress.push((event.stage, event.message.clone()));
+    })
+    .expect("CBZ conversion should not require an API key");
+
+    assert_eq!(summary.output_path, output_epub);
+    assert_eq!(summary.pages_processed, 2);
+    assert_eq!(summary.chapters, 2);
+    assert_eq!(summary.images, 2);
+    assert!(!summary.cache_hit);
+    assert!(!progress
+        .iter()
+        .any(|(stage, _)| *stage == ConvertStage::Ocr));
+    assert!(!progress.iter().any(|(_, message)| {
+        let message = message.to_ascii_lowercase();
+        message.contains("ocr") || message.contains("cache")
+    }));
+
+    let mut archive = ZipArchive::new(File::open(&output_epub).expect("EPUB should exist"))
+        .expect("EPUB should be readable");
+    let names = zip_entry_names(&mut archive);
+    assert!(!names.contains(&"OEBPS/text/cover.xhtml".to_string()));
+
+    let opf = read_zip_entry(&mut archive, "OEBPS/content.opf");
+    assert!(opf.contains("<dc:title>Explicit Title</dc:title>"));
+    assert!(opf.contains("<dc:creator>Archive Writer</dc:creator>"));
+    assert!(opf.contains("<dc:language>ja</dc:language>"));
+    assert!(opf.contains("<dc:publisher>Archive Press</dc:publisher>"));
+    assert!(opf.contains("<dc:description>Archive summary</dc:description>"));
+    assert!(opf.contains(&format!(
+        "<dc:identifier id=\"bookid\">urn:sha256:{source_hash}</dc:identifier>"
+    )));
+    assert!(opf.contains("<meta property=\"rendition:layout\">pre-paginated</meta>"));
+    assert!(opf.contains("<meta property=\"rendition:orientation\">auto</meta>"));
+    assert!(opf.contains("<meta property=\"rendition:spread\">none</meta>"));
+    assert!(opf.contains("page-progression-direction=\"rtl\""));
+    assert!(opf.contains(
+        "href=\"images/page-0002.png\" media-type=\"image/png\" properties=\"cover-image\""
+    ));
+    assert_eq!(opf.matches("<itemref ").count(), 2);
+
+    let nav = read_zip_entry(&mut archive, "OEBPS/nav.xhtml");
+    assert!(nav.contains("epub:type=\"page-list\""));
+    let first_page = read_zip_entry(&mut archive, "OEBPS/text/page-0001.xhtml");
+    assert!(first_page.contains("name=\"viewport\" content=\"width=1, height=1\""));
+    assert!(first_page.contains("<html class=\"fixed-layout\""));
+    assert!(first_page.contains("../images/page-0001.png"));
+    let css = read_zip_entry(&mut archive, "OEBPS/styles/book.css");
+    assert!(!css.contains("100vh"));
+    assert!(css.contains(".fixed-layout"));
+
+    let mut first_image = archive
+        .by_name("OEBPS/images/page-0001.png")
+        .expect("first image should exist");
+    assert_eq!(first_image.compression(), CompressionMethod::Stored);
+    let mut first_image_bytes = Vec::new();
+    first_image
+        .read_to_end(&mut first_image_bytes)
+        .expect("first image should read");
+    assert!(first_image_bytes.windows(3).any(|window| window == b"TWO"));
+}
+
+#[test]
+fn cbz_rejects_path_traversal_entries() {
+    let workspace = TestWorkspace::new("cbz-traversal");
+    let input_cbz = workspace.path("bad.cbz");
+    let output_epub = workspace.path("bad.epub");
+    write_cbz(
+        &input_cbz,
+        &[("../escape.png", &png_with_text("page", "BAD"))],
+    );
+
+    let cfg = fixture_config(input_cbz, output_epub, workspace.path("cache"));
+    let error = convert_to_epub(&cfg).expect_err("traversal entry must be rejected");
+    assert_eq!(error.kind, ErrorKind::BadArgs);
+    assert!(error.message.contains("Unsafe CBZ entry path"));
+}
+
+#[test]
+fn cbz_rejects_symlink_entries() {
+    let workspace = TestWorkspace::new("cbz-symlink");
+    let input_cbz = workspace.path("bad.cbz");
+    let output_epub = workspace.path("bad.epub");
+    let file = File::create(&input_cbz).expect("CBZ should be created");
+    let mut zip = ZipWriter::new(file);
+    zip.add_symlink("page.png", "target.png", FileOptions::default())
+        .expect("symlink entry should be written");
+    zip.finish().expect("CBZ should finish");
+
+    let cfg = fixture_config(input_cbz, output_epub, workspace.path("cache"));
+    let error = convert_to_epub(&cfg).expect_err("symlink entry must be rejected");
+    assert_eq!(error.kind, ErrorKind::BadArgs);
+    assert!(error.message.contains("symbolic link"));
+}
+
+#[test]
+fn cbz_rejects_duplicate_root_comic_info() {
+    let workspace = TestWorkspace::new("cbz-duplicate-comic-info");
+    let input_cbz = workspace.path("bad.cbz");
+    let output_epub = workspace.path("bad.epub");
+    write_cbz(
+        &input_cbz,
+        &[
+            ("ComicInfo.xml", b"<ComicInfo/>"),
+            ("comicinfo.XML", b"<ComicInfo/>"),
+            ("page.png", &png_with_text("page", "ONE")),
+        ],
+    );
+
+    let cfg = fixture_config(input_cbz, output_epub, workspace.path("cache"));
+    let error = convert_to_epub(&cfg).expect_err("duplicate ComicInfo must be rejected");
+    assert_eq!(error.kind, ErrorKind::BadArgs);
+    assert!(error.message.contains("duplicate root ComicInfo.xml"));
+}
+
 fn fixture_config(input_pdf: PathBuf, output_epub: PathBuf, cache_dir: PathBuf) -> ConvertConfig {
     ConvertConfig {
         input_pdf,
@@ -444,4 +592,48 @@ fn read_zip_entry(archive: &mut ZipArchive<File>, path: &str) -> String {
     file.read_to_string(&mut content)
         .unwrap_or_else(|error| panic!("failed reading zip entry '{path}': {error}"));
     content
+}
+
+fn write_cbz(path: &PathBuf, entries: &[(&str, &[u8])]) {
+    let file = File::create(path).expect("CBZ should be created");
+    let mut zip = ZipWriter::new(file);
+    for (name, bytes) in entries {
+        zip.start_file(
+            *name,
+            FileOptions::default().compression_method(CompressionMethod::Deflated),
+        )
+        .expect("CBZ entry should start");
+        zip.write_all(bytes).expect("CBZ entry should be written");
+    }
+    zip.finish().expect("CBZ should finish");
+}
+
+fn png_with_text(key: &str, value: &str) -> Vec<u8> {
+    let mut output = b"\x89PNG\r\n\x1a\n".to_vec();
+    let mut ihdr = Vec::new();
+    ihdr.extend_from_slice(&1_u32.to_be_bytes());
+    ihdr.extend_from_slice(&1_u32.to_be_bytes());
+    ihdr.extend_from_slice(&[8, 0, 0, 0, 0]);
+    append_png_chunk(&mut output, b"IHDR", &ihdr);
+    // One unfiltered grayscale pixel in a no-compression zlib block.
+    append_png_chunk(
+        &mut output,
+        b"IDAT",
+        &[
+            0x78, 0x01, 0x01, 0x02, 0x00, 0xfd, 0xff, 0x00, 0x00, 0x00, 0x02, 0x00, 0x01,
+        ],
+    );
+    append_png_chunk(&mut output, b"tEXt", format!("{key}\0{value}").as_bytes());
+    append_png_chunk(&mut output, b"IEND", &[]);
+    output
+}
+
+fn append_png_chunk(output: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
+    output.extend_from_slice(&(data.len() as u32).to_be_bytes());
+    output.extend_from_slice(kind);
+    output.extend_from_slice(data);
+    let mut crc = crc32fast::Hasher::new();
+    crc.update(kind);
+    crc.update(data);
+    output.extend_from_slice(&crc.finalize().to_be_bytes());
 }

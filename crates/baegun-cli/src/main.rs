@@ -1,7 +1,9 @@
 use baegun_core::{
-    convert_pdf_to_epub, BaegunError, ConvertConfig, ConvertSummary, ErrorKind, TableFormat,
+    convert_to_epub, detect_source_format, BaegunError, ConvertConfig, ConvertSummary, ErrorKind,
+    SourceFormat, TableFormat,
 };
 use clap::{ArgAction, Args, Parser, Subcommand};
+use std::collections::HashSet;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -10,7 +12,7 @@ use std::process;
 #[derive(Debug, Parser)]
 #[command(name = "baegun")]
 #[command(version)]
-#[command(about = "Convert PDFs to EPUBs with Mistral OCR")]
+#[command(about = "Convert PDF and CBZ books to EPUB")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -25,7 +27,7 @@ enum Commands {
 
 #[derive(Debug, Args)]
 struct ConvertArgs {
-    input_pdf: PathBuf,
+    input: PathBuf,
 
     #[arg(short = 'o', long = "output")]
     output: Option<PathBuf>,
@@ -109,10 +111,10 @@ struct CommonConvertArgs {
     #[arg(long = "verbose", action = ArgAction::SetTrue)]
     verbose: bool,
 
-    #[arg(long = "comic", action = ArgAction::SetTrue, help = "Comic mode: render each page as a full-bleed image")]
+    #[arg(long = "comic", action = ArgAction::SetTrue, help = "PDF-only comic mode: render each OCR page as a full-bleed image")]
     comic: bool,
 
-    #[arg(long = "delete-source", action = ArgAction::SetTrue, help = "Delete source PDF after successful conversion")]
+    #[arg(long = "delete-source", action = ArgAction::SetTrue, help = "Delete the source book after successful conversion")]
     delete_source: bool,
 }
 
@@ -135,15 +137,9 @@ fn main() {
 fn run_convert(args: ConvertArgs) -> Result<(), BaegunError> {
     let output_epub = args
         .output
-        .unwrap_or_else(|| args.input_pdf.with_extension("epub"));
+        .unwrap_or_else(|| args.input.with_extension("epub"));
 
     let api_key = resolve_api_key(args.options.api_key.clone());
-    if api_key.is_none() {
-        return Err(BaegunError::new(
-            ErrorKind::BadArgs,
-            "Missing API key. Pass --api-key or set MISTRAL_API_KEY.",
-        ));
-    }
 
     let table_format = args
         .options
@@ -152,9 +148,9 @@ fn run_convert(args: ConvertArgs) -> Result<(), BaegunError> {
         .map_err(BaegunError::bad_args)?;
 
     let delete_source = args.options.delete_source;
-    let input_path = args.input_pdf.clone();
+    let input_path = args.input.clone();
     let cfg = build_config(
-        args.input_pdf,
+        args.input,
         output_epub,
         &args.options,
         api_key,
@@ -196,12 +192,6 @@ fn run_convert_batch(args: ConvertBatchArgs) -> Result<(), BaegunError> {
     })?;
 
     let api_key = resolve_api_key(args.options.api_key.clone());
-    if api_key.is_none() {
-        return Err(BaegunError::new(
-            ErrorKind::BadArgs,
-            "Missing API key. Pass --api-key or set MISTRAL_API_KEY.",
-        ));
-    }
 
     let table_format = args
         .options
@@ -209,18 +199,18 @@ fn run_convert_batch(args: ConvertBatchArgs) -> Result<(), BaegunError> {
         .parse::<TableFormat>()
         .map_err(BaegunError::bad_args)?;
 
-    let pdf_files = collect_pdf_files(&args.input_dir, args.recursive)?;
-    if pdf_files.is_empty() {
+    let book_files = collect_book_files(&args.input_dir, args.recursive)?;
+    if book_files.is_empty() {
         return Err(BaegunError::bad_args(format!(
-            "No PDF files found in '{}'.",
+            "No PDF or CBZ files found in '{}'.",
             args.input_dir.display()
         )));
     }
 
     if !args.options.quiet {
         println!(
-            "Found {} PDF file(s) in '{}'{}.",
-            pdf_files.len(),
+            "Found {} book file(s) in '{}'{}.",
+            book_files.len(),
             args.input_dir.display(),
             if args.recursive { " (recursive)" } else { "" }
         );
@@ -233,9 +223,13 @@ fn run_convert_batch(args: ConvertBatchArgs) -> Result<(), BaegunError> {
     let mut total_images = 0_usize;
     let mut cache_hits = 0_usize;
     let mut sources_deleted = 0_usize;
+    let mut used_outputs = HashSet::new();
 
-    for input_pdf in pdf_files {
-        let output_epub = derive_batch_output_path(&input_pdf, &args.input_dir, &output_dir);
+    for input in book_files {
+        let output_epub = unique_batch_output_path(
+            derive_batch_output_path(&input, &args.input_dir, &output_dir),
+            &mut used_outputs,
+        );
         if let Some(parent) = output_epub.parent() {
             fs::create_dir_all(parent).map_err(|error| {
                 BaegunError::internal(format!(
@@ -246,7 +240,7 @@ fn run_convert_batch(args: ConvertBatchArgs) -> Result<(), BaegunError> {
         }
 
         let cfg = build_config(
-            input_pdf.clone(),
+            input.clone(),
             output_epub,
             &args.options,
             api_key.clone(),
@@ -263,11 +257,11 @@ fn run_convert_batch(args: ConvertBatchArgs) -> Result<(), BaegunError> {
                     cache_hits += 1;
                 }
                 if args.options.delete_source {
-                    if let Err(error) = delete_source_file(&input_pdf, args.options.quiet) {
+                    if let Err(error) = delete_source_file(&input, args.options.quiet) {
                         if !args.options.quiet {
                             eprintln!(
                                 "Warning: converted '{}' but failed to delete source: {}",
-                                input_pdf.display(),
+                                input.display(),
                                 error.message
                             );
                         }
@@ -278,9 +272,9 @@ fn run_convert_batch(args: ConvertBatchArgs) -> Result<(), BaegunError> {
             }
             Err(error) => {
                 if !args.options.quiet {
-                    eprintln!("Failed '{}': {}", input_pdf.display(), error.message);
+                    eprintln!("Failed '{}': {}", input.display(), error.message);
                 }
-                failures.push((input_pdf, error));
+                failures.push((input, error));
             }
         }
     }
@@ -294,8 +288,8 @@ fn run_convert_batch(args: ConvertBatchArgs) -> Result<(), BaegunError> {
         );
         if successes > 0 {
             println!(
-                "Totals: {} pages, {} chapters, {} images, {}/{} cache hits.",
-                total_pages, total_chapters, total_images, cache_hits, successes
+                "Totals: {} pages, {} chapters, {} images, {} PDF OCR cache hit(s).",
+                total_pages, total_chapters, total_images, cache_hits
             );
         }
         if sources_deleted > 0 {
@@ -374,17 +368,24 @@ fn run_single_conversion(cfg: &ConvertConfig) -> Result<ConvertSummary, BaegunEr
         println!("Converting '{}' ...", cfg.input_pdf.display());
     }
 
-    let summary = convert_pdf_to_epub(cfg)?;
+    let source_format = detect_source_format(&cfg.input_pdf)?;
+    let summary = convert_to_epub(cfg)?;
 
     if !cfg.quiet {
         println!("Done: {}", summary.output_path.display());
-        println!(
-            "Pages: {}, chapters: {}, images: {}, cache: {}",
-            summary.pages_processed,
-            summary.chapters,
-            summary.images,
-            if summary.cache_hit { "hit" } else { "miss" }
-        );
+        match source_format {
+            SourceFormat::Pdf => println!(
+                "Pages: {}, chapters: {}, images: {}, OCR cache: {}",
+                summary.pages_processed,
+                summary.chapters,
+                summary.images,
+                if summary.cache_hit { "hit" } else { "miss" }
+            ),
+            SourceFormat::Cbz => println!(
+                "Pages: {}, fixed-layout pages: {}, images: {}",
+                summary.pages_processed, summary.chapters, summary.images
+            ),
+        }
         if let Some(validation) = summary.validation.as_ref() {
             println!(
                 "Validation: passed={}, warnings={}, errors={}",
@@ -396,14 +397,14 @@ fn run_single_conversion(cfg: &ConvertConfig) -> Result<ConvertSummary, BaegunEr
     Ok(summary)
 }
 
-fn collect_pdf_files(input_dir: &Path, recursive: bool) -> Result<Vec<PathBuf>, BaegunError> {
+fn collect_book_files(input_dir: &Path, recursive: bool) -> Result<Vec<PathBuf>, BaegunError> {
     let mut files = Vec::new();
-    collect_pdf_files_inner(input_dir, recursive, &mut files)?;
+    collect_book_files_inner(input_dir, recursive, &mut files)?;
     files.sort();
     Ok(files)
 }
 
-fn collect_pdf_files_inner(
+fn collect_book_files_inner(
     directory: &Path,
     recursive: bool,
     files: &mut Vec<PathBuf>,
@@ -426,12 +427,12 @@ fn collect_pdf_files_inner(
 
         if path.is_dir() {
             if recursive {
-                collect_pdf_files_inner(&path, true, files)?;
+                collect_book_files_inner(&path, true, files)?;
             }
             continue;
         }
 
-        if is_pdf_file(&path) {
+        if is_book_file(&path) {
             files.push(path);
         }
     }
@@ -439,10 +440,10 @@ fn collect_pdf_files_inner(
     Ok(())
 }
 
-fn is_pdf_file(path: &Path) -> bool {
+fn is_book_file(path: &Path) -> bool {
     path.extension()
         .and_then(|value| value.to_str())
-        .map(|value| value.eq_ignore_ascii_case("pdf"))
+        .map(|value| value.eq_ignore_ascii_case("pdf") || value.eq_ignore_ascii_case("cbz"))
         .unwrap_or(false)
 }
 
@@ -451,6 +452,30 @@ fn derive_batch_output_path(input_pdf: &Path, input_dir: &Path, output_dir: &Pat
     let mut output_epub = output_dir.join(relative_path);
     output_epub.set_extension("epub");
     output_epub
+}
+
+fn unique_batch_output_path(candidate: PathBuf, used: &mut HashSet<String>) -> PathBuf {
+    if used.insert(case_insensitive_path_key(&candidate)) {
+        return candidate;
+    }
+
+    let parent = candidate.parent().unwrap_or_else(|| Path::new(""));
+    let stem = candidate
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("output");
+    let mut counter = 2_usize;
+    loop {
+        let suffixed = parent.join(format!("{stem}-{counter}.epub"));
+        if used.insert(case_insensitive_path_key(&suffixed)) {
+            return suffixed;
+        }
+        counter += 1;
+    }
+}
+
+fn case_insensitive_path_key(path: &Path) -> String {
+    path.to_string_lossy().to_lowercase()
 }
 
 fn build_batch_failure_error(successes: usize, failures: &[(PathBuf, BaegunError)]) -> BaegunError {
@@ -470,8 +495,9 @@ fn build_batch_failure_error(successes: usize, failures: &[(PathBuf, BaegunError
 
 #[cfg(test)]
 mod tests {
-    use super::{derive_batch_output_path, is_pdf_file, Cli, Commands};
+    use super::{derive_batch_output_path, is_book_file, unique_batch_output_path, Cli, Commands};
     use clap::Parser;
+    use std::collections::HashSet;
     use std::path::{Path, PathBuf};
 
     #[test]
@@ -511,10 +537,12 @@ mod tests {
     }
 
     #[test]
-    fn pdf_detection_is_case_insensitive() {
-        assert!(is_pdf_file(Path::new("sample.pdf")));
-        assert!(is_pdf_file(Path::new("sample.PDF")));
-        assert!(!is_pdf_file(Path::new("sample.txt")));
+    fn book_detection_is_case_insensitive() {
+        assert!(is_book_file(Path::new("sample.pdf")));
+        assert!(is_book_file(Path::new("sample.PDF")));
+        assert!(is_book_file(Path::new("sample.cbz")));
+        assert!(is_book_file(Path::new("sample.CBZ")));
+        assert!(!is_book_file(Path::new("sample.txt")));
     }
 
     #[test]
@@ -525,5 +553,18 @@ mod tests {
 
         let output = derive_batch_output_path(&input_pdf, &input_dir, &output_dir);
         assert_eq!(output, output_dir.join("nested").join("book.epub"));
+    }
+
+    #[test]
+    fn batch_output_suffixes_case_insensitive_pdf_cbz_name_collisions() {
+        let mut used = HashSet::new();
+        let input_dir = PathBuf::from("input");
+        let output_dir = PathBuf::from("output");
+        let pdf = derive_batch_output_path(&input_dir.join("Book.pdf"), &input_dir, &output_dir);
+        let cbz = derive_batch_output_path(&input_dir.join("book.cbz"), &input_dir, &output_dir);
+        let first = unique_batch_output_path(pdf, &mut used);
+        let second = unique_batch_output_path(cbz, &mut used);
+        assert_eq!(first, PathBuf::from("output/Book.epub"));
+        assert_eq!(second, PathBuf::from("output/book-2.epub"));
     }
 }

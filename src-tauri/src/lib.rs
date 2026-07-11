@@ -8,6 +8,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
+            commands::convert_book,
             commands::convert_pdf,
             commands::is_directory,
             commands::get_system_colors,
