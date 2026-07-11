@@ -42,7 +42,11 @@ pub async fn check_self_update() -> Result<Option<UpdateInfo>, String> {
     let endpoint = format!("https://api.github.com/repos/{OWNER}/{REPO}/releases/latest");
     let client = reqwest::Client::builder()
         // GitHub's API requires a User-Agent.
-        .user_agent(concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!(
+            env!("CARGO_PKG_NAME"),
+            "/",
+            env!("CARGO_PKG_VERSION")
+        ))
         .build()
         .map_err(|e| e.to_string())?;
 
@@ -58,7 +62,10 @@ pub async fn check_self_update() -> Result<Option<UpdateInfo>, String> {
         return Ok(None); // the repo has no published release yet
     }
     if !response.status().is_success() {
-        return Err(format!("GitHub returned HTTP {}", response.status().as_u16()));
+        return Err(format!(
+            "GitHub returned HTTP {}",
+            response.status().as_u16()
+        ));
     }
 
     let release: GitHubRelease = response.json().await.map_err(|e| e.to_string())?;
@@ -108,7 +115,10 @@ fn is_newer(latest: &str, current: &str) -> bool {
     }
     let (a, b) = (parts(latest), parts(current));
     for i in 0..a.len().max(b.len()) {
-        let (l, r) = (a.get(i).copied().unwrap_or(0), b.get(i).copied().unwrap_or(0));
+        let (l, r) = (
+            a.get(i).copied().unwrap_or(0),
+            b.get(i).copied().unwrap_or(0),
+        );
         if l != r {
             return l > r;
         }

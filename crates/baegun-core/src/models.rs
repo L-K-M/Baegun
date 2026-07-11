@@ -4,17 +4,12 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::str::FromStr;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum TableFormat {
+    #[default]
     Html,
     Markdown,
-}
-
-impl Default for TableFormat {
-    fn default() -> Self {
-        Self::Html
-    }
 }
 
 impl TableFormat {

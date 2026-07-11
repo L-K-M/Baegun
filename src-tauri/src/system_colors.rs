@@ -20,7 +20,8 @@ const DEFAULT_ACCENT: Rgb = (0, 122, 255);
 #[cfg(target_os = "macos")]
 pub fn get_system_colors() -> SystemColors {
     let accent_rgb = ns_color_to_rgb(&NSColor::controlAccentColor()).unwrap_or(DEFAULT_ACCENT);
-    let highlight_rgb = ns_color_to_rgb(&NSColor::selectedContentBackgroundColor()).unwrap_or(accent_rgb);
+    let highlight_rgb =
+        ns_color_to_rgb(&NSColor::selectedContentBackgroundColor()).unwrap_or(accent_rgb);
 
     let accent_text_rgb = ns_color_to_rgb(&NSColor::selectedControlTextColor())
         .unwrap_or_else(|| contrast_text_rgb(accent_rgb));
@@ -58,12 +59,7 @@ fn ns_color_to_rgb(color: &NSColor) -> Option<Rgb> {
     let mut _alpha_component = 0.0;
 
     unsafe {
-        converted.getRed_green_blue_alpha(
-            &mut red,
-            &mut green,
-            &mut blue,
-            &mut _alpha_component,
-        );
+        converted.getRed_green_blue_alpha(&mut red, &mut green, &mut blue, &mut _alpha_component);
     }
 
     Some((
