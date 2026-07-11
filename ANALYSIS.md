@@ -20,6 +20,7 @@ its relevant items below.
 - PR #12: updater browser links restricted to the project's exact HTTPS GitHub
   release path.
 - PR #13: desktop completion/cancellation summaries scoped to the current run.
+- PR #15: repository-wide Rust formatting and current-stable Clippy baseline restored.
 - PR #9: full historical review in `sol.md` with evidence and naming analysis.
 
 Known limitations of the first CBZ slice remain active below: memory streaming,
@@ -535,11 +536,6 @@ PR #11 resolves tag/version mismatch gating when merged. Remaining work:
 - Reconcile updater-signing secrets/docs with the current notification-only updater;
   either remove dead claims or implement signed Tauri updating end to end.
 - Add an action/workflow syntax linter and version-gate tests.
-
-The current Rust stable toolchain reports pre-existing `cargo fmt --all --check` drift
-in `src-tauri/src/system_colors.rs` and `src-tauri/src/updates.rs`, and a derivable
-`Default` clippy warning in `baegun-core::TableFormat` on Rust 1.97. Clean these baseline
-quality-gate issues in a focused maintenance PR.
 
 ## Test and Benchmark Plan
 
