@@ -1,28 +1,32 @@
 use crate::errors::{BaegunError, Result};
 use crate::models::RenderedBook;
-use std::fs::{self, File};
+use crate::output::AtomicOutput;
+use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 use zip::write::FileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
-pub fn write_epub(book: &RenderedBook, output_path: &Path) -> Result<()> {
-    if let Some(parent) = output_path.parent() {
-        fs::create_dir_all(parent).map_err(|error| {
-            BaegunError::epub(format!(
-                "Failed creating output directory '{}': {error}",
-                parent.display()
-            ))
-        })?;
-    }
+pub(crate) fn package_and_publish<T, V, P>(
+    book: &RenderedBook,
+    output_path: &Path,
+    validate: V,
+    before_publish: P,
+) -> Result<T>
+where
+    V: FnOnce(&Path) -> Result<T>,
+    P: FnOnce() -> Result<()>,
+{
+    let mut output = AtomicOutput::create(output_path)?;
+    write_epub(book, output.file_mut())?;
+    output.sync()?;
+    let validation = validate(output.path())?;
+    before_publish()?;
+    output.publish()?;
+    Ok(validation)
+}
 
-    let file = File::create(output_path).map_err(|error| {
-        BaegunError::epub(format!(
-            "Failed creating EPUB output '{}': {error}",
-            output_path.display()
-        ))
-    })?;
-
+fn write_epub(book: &RenderedBook, file: &mut File) -> Result<()> {
     let mut zip = ZipWriter::new(file);
     let stored = FileOptions::default().compression_method(CompressionMethod::Stored);
     let deflated = FileOptions::default().compression_method(CompressionMethod::Deflated);
@@ -308,8 +312,14 @@ fn io_error(path: &str) -> impl Fn(std::io::Error) -> BaegunError + '_ {
 
 #[cfg(test)]
 mod tests {
-    use super::build_content_opf;
+    use super::{build_content_opf, package_and_publish};
+    use crate::errors::{BaegunError, ErrorKind, Result};
     use crate::models::{RenderedBook, RenderedChapter};
+    use crate::output::{ensure_destination_is_distinct, open_source_distinct_from_destination};
+    use std::ffi::OsString;
+    use std::fs::{self, File};
+    use std::path::Path;
+    use zip::ZipArchive;
 
     fn sample_book() -> RenderedBook {
         RenderedBook {
@@ -341,5 +351,92 @@ mod tests {
         );
         // Whole-second xsd:dateTime in UTC (ends with `Z`), e.g. 2024-01-02T03:04:05Z.
         assert!(opf.contains("T") && opf.contains("Z</meta>"));
+    }
+
+    #[test]
+    fn validation_failure_preserves_destination_and_removes_temporary_epub() {
+        let directory = tempfile::tempdir().expect("temporary directory should be created");
+        let destination = directory.path().join("book.epub");
+        let original_bytes = b"existing destination bytes";
+        fs::write(&destination, original_bytes).expect("existing destination should be written");
+        let entries_before = directory_entries(directory.path());
+
+        let result: Result<()> = package_and_publish(
+            &sample_book(),
+            &destination,
+            |staged_path| {
+                assert_eq!(staged_path.parent(), Some(directory.path()));
+                assert_eq!(
+                    staged_path.extension().and_then(|value| value.to_str()),
+                    Some("epub")
+                );
+                ZipArchive::new(File::open(staged_path).expect("staged EPUB should be readable"))
+                    .expect("staged EPUB should be a readable zip archive");
+                Err(BaegunError::validation("forced validation failure"))
+            },
+            || Ok(()),
+        );
+
+        let error = result.expect_err("validation failure should prevent publication");
+        assert_eq!(error.kind, ErrorKind::Validation);
+        assert_eq!(
+            fs::read(&destination).expect("existing destination should remain readable"),
+            original_bytes
+        );
+        assert_eq!(directory_entries(directory.path()), entries_before);
+    }
+
+    #[test]
+    fn source_moved_to_destination_during_validation_blocks_publication() {
+        let directory = tempfile::tempdir().expect("temporary directory should be created");
+        let source = directory.path().join("source.pdf");
+        let destination = directory.path().join("book.epub");
+        let source_bytes = b"source bytes must survive";
+        fs::write(&source, source_bytes).expect("source fixture should be written");
+        let (_source_file, source_identity) =
+            open_source_distinct_from_destination(&source, &destination)
+                .expect("source and missing destination should be distinct");
+
+        let result: Result<()> = package_and_publish(
+            &sample_book(),
+            &destination,
+            |staged_path| {
+                ZipArchive::new(File::open(staged_path).expect("staged EPUB should be readable"))
+                    .expect("staged EPUB should be a readable zip archive");
+                fs::rename(&source, &destination)
+                    .expect("source should move to destination during validation");
+                Ok(())
+            },
+            || ensure_destination_is_distinct(&source_identity, &source, &destination),
+        );
+
+        let error = result.expect_err("source identity at destination should block publication");
+        assert_eq!(error.kind, ErrorKind::BadArgs);
+        assert!(error.message.contains("same filesystem file"));
+        assert!(!source.exists());
+        assert_eq!(
+            fs::read(&destination).expect("moved source should remain at destination"),
+            source_bytes
+        );
+        assert_eq!(
+            directory_entries(directory.path()),
+            vec![destination
+                .file_name()
+                .expect("destination should have a file name")
+                .to_os_string()]
+        );
+    }
+
+    fn directory_entries(path: &Path) -> Vec<OsString> {
+        let mut entries = fs::read_dir(path)
+            .expect("directory should be readable")
+            .map(|entry| {
+                entry
+                    .expect("directory entry should be readable")
+                    .file_name()
+            })
+            .collect::<Vec<_>>();
+        entries.sort();
+        entries
     }
 }

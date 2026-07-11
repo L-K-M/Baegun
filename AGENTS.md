@@ -21,6 +21,9 @@ No Python runtime or Tk GUI remains in the main architecture.
 - OCR payloads are cached under `.baegun-cache` by default.
 - Use `--no-cache` for sensitive documents.
 - Uploaded OCR files are deleted by default unless `--keep-remote-file` is set.
+- Input and output paths that identify the same filesystem file are rejected before cache or network work, before temporary-file creation, and immediately before publication, including noncanonical, symlink, and hard-link aliases where supported.
+- EPUB output is staged in a securely created temporary file in the destination directory, optionally validated there, and atomically replaces the destination only after success on supported Unix and Windows platforms.
+- Packaging, validation, and atomic-publication errors preserve an existing destination and clean up the temporary output.
 - In the desktop app, API key entry and conversion toggles (`Include images`, `Comic mode`, `Run epubcheck`) live in `Settings...`.
 - The desktop app Settings dialog includes a shortcut link to the Mistral API key page.
 - After at least one successful conversion, the desktop app can open the selected target output folder.
@@ -65,8 +68,9 @@ PDF
  -> normalization (headers/footers, placeholders, images, tables)
  -> chapter segmentation (H1 boundaries)
  -> markdown -> HTML -> XHTML
- -> EPUB 3 zip packaging
- -> optional epubcheck validation
+ -> EPUB 3 zip packaging in destination-directory temporary file
+ -> optional epubcheck validation of temporary EPUB
+ -> atomic destination publication
 ```
 
 Shared modules live in `crates/baegun-core` and are used by both CLI and Tauri command handlers.
@@ -218,12 +222,15 @@ Generated archive includes:
 
 When a first-page image is available, mark its manifest item with `properties="cover-image"`.
 
+Package through the shared atomic-output seam rather than opening the final destination directly. Validation must receive the temporary EPUB path, and successful publication preserves overwrite behavior by using `tempfile::NamedTempFile::persist`, which atomically replaces existing files on supported Unix and Windows targets.
+
 ## Operational Notes
 
 - Keep core conversion behavior deterministic.
 - Keep cache key tied to PDF bytes + OCR-relevant options + pipeline version.
 - Keep frontend and CLI behavior aligned for the same config.
 - Keep Tauri command payloads serializable and stable.
+- Keep source/destination identity checks and atomic publication format-neutral so additional conversion inputs can reuse them.
 
 ## Testing and Validation
 

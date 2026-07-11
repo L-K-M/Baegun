@@ -5,6 +5,7 @@ mod metadata;
 mod mistral;
 mod models;
 mod normalize;
+mod output;
 mod validate;
 
 pub use errors::{BaegunError, ErrorKind, Result};
@@ -15,6 +16,7 @@ pub use models::{
 
 use sha2::{Digest, Sha256};
 use std::fs;
+use std::io::Read;
 
 pub fn convert_pdf_to_epub(cfg: &ConvertConfig) -> Result<ConvertSummary> {
     convert_pdf_to_epub_with_progress(cfg, |_| {})
@@ -38,21 +40,10 @@ where
         None,
     );
 
-    if !cfg.input_pdf.exists() {
-        return Err(BaegunError::bad_args(format!(
-            "Input PDF does not exist: {}",
-            cfg.input_pdf.display()
-        )));
-    }
-
-    if !cfg.input_pdf.is_file() {
-        return Err(BaegunError::bad_args(format!(
-            "Input path is not a file: {}",
-            cfg.input_pdf.display()
-        )));
-    }
-
-    let pdf_bytes = fs::read(&cfg.input_pdf).map_err(|error| {
+    let (mut input_file, source_identity) =
+        output::open_source_distinct_from_destination(&cfg.input_pdf, &cfg.output_epub)?;
+    let mut pdf_bytes = Vec::new();
+    input_file.read_to_end(&mut pdf_bytes).map_err(|error| {
         BaegunError::internal(format!(
             "Failed reading input PDF '{}': {error}",
             cfg.input_pdf.display()
@@ -167,26 +158,35 @@ where
         Some(cache_hit),
     );
 
-    epub::write_epub(&rendered, &cfg.output_epub)?;
+    output::ensure_destination_is_distinct(&source_identity, &cfg.input_pdf, &cfg.output_epub)?;
+    let validation = epub::package_and_publish(
+        &rendered,
+        &cfg.output_epub,
+        |temporary_path| {
+            if cfg.validate {
+                emit_progress(
+                    &mut on_progress,
+                    ConvertStage::Validate,
+                    5,
+                    total_steps,
+                    "Running epubcheck validation",
+                    Some(cache_hit),
+                );
 
-    let validation = if cfg.validate {
-        emit_progress(
-            &mut on_progress,
-            ConvertStage::Validate,
-            5,
-            total_steps,
-            "Running epubcheck validation",
-            Some(cache_hit),
-        );
-
-        Some(validate::run_epubcheck(
-            &cfg.epubcheck_bin,
-            &cfg.output_epub,
-            cfg.fail_on_warn,
-        )?)
-    } else {
-        None
-    };
+                validate::run_epubcheck(&cfg.epubcheck_bin, temporary_path, cfg.fail_on_warn)
+                    .map(Some)
+            } else {
+                Ok(None)
+            }
+        },
+        || {
+            output::ensure_destination_is_distinct(
+                &source_identity,
+                &cfg.input_pdf,
+                &cfg.output_epub,
+            )
+        },
+    )?;
 
     let summary = ConvertSummary {
         output_path: cfg.output_epub.clone(),
