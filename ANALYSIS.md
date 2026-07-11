@@ -2,16 +2,17 @@
 
 Last reconciled: 2026-07-11
 
-This is the maintained forward-looking roadmap for Baegun. It incorporates the
-full review recorded in `sol.md` while removing completed work from the active
-backlog. Keep this document aligned with behavior and delete items when they are
-implemented and verified; do not leave completed tasks mixed into future work.
+This is the maintained forward-looking roadmap for Baegun. It folds in the full
+project review originally captured in `sol.md` (PR #9, closed as superseded by
+this document) while removing completed work from the active backlog. Keep this
+document aligned with behavior and delete items when they are implemented and
+verified; do not leave completed tasks mixed into future work.
 
-## Implemented, Awaiting Merge
+## Recently Merged
 
-These changes are complete in isolated pull requests and are intentionally not
-duplicated in the active backlog. If a PR is closed without replacement, restore
-its relevant items below.
+These changes have landed on `main` and are intentionally not duplicated in the
+active backlog. If any is later reverted without replacement, restore its
+relevant items below.
 
 - PR #10: local CBZ-to-EPUB conversion, guarded ZIP reads, natural page ordering,
   JPEG/PNG decoder validation, bounded `ComicInfo.xml`, deleted-page filtering,
@@ -23,7 +24,7 @@ its relevant items below.
 - PR #15: repository-wide Rust formatting and current-stable Clippy baseline restored.
 - PR #16: source/output filesystem identity protection and staged, validated, atomic
   EPUB publication with failure preservation.
-- PR #9: full historical review in `sol.md` with evidence and naming analysis.
+- PR #8: design doc for pluggable OCR providers (`docs/ocr-providers.md`).
 
 Known limitations of the first CBZ slice remain active below: memory streaming,
 additional image compatibility profiles, richer ComicInfo metadata, user controls,
