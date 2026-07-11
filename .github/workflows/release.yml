@@ -12,11 +12,56 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  verify-version:
+    name: Verify release version
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Match tag and embedded versions
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+
+          const tag = process.env.RELEASE_TAG ?? '';
+          const semver = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+          if (!semver.test(tag)) {
+            throw new Error(`Release tag '${tag}' is not strict SemVer prefixed with v.`);
+          }
+
+          const expected = tag.slice(1);
+          const cargo = fs.readFileSync('Cargo.toml', 'utf8');
+          const cargoVersion = cargo
+            .match(/\[workspace\.package\][\s\S]*?\nversion\s*=\s*"([^"]+)"/)?.[1];
+          const packageVersion = JSON.parse(fs.readFileSync('package.json', 'utf8')).version;
+          const tauriVersion = JSON.parse(
+            fs.readFileSync('src-tauri/tauri.conf.json', 'utf8')
+          ).version;
+
+          const versions = {
+            'Cargo.toml workspace': cargoVersion,
+            'package.json': packageVersion,
+            'src-tauri/tauri.conf.json': tauriVersion,
+          };
+          for (const [source, version] of Object.entries(versions)) {
+            if (version !== expected) {
+              throw new Error(`${source} is '${version ?? '<missing>'}', expected '${expected}' from ${tag}.`);
+            }
+          }
+
+          console.log(`Release tag and embedded versions all match ${expected}.`);
+          NODE
+
   # ---------------------------------------------------------------------------
   # Create a draft release that every build job uploads its artifacts into.
   # ---------------------------------------------------------------------------
   create-release:
     name: Create draft release
+    needs: verify-version
     runs-on: ubuntu-22.04
     outputs:
       release_id: ${{ steps.create.outputs.result }}
