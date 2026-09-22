@@ -1,5 +1,8 @@
 # Baegun
 
+> [!IMPORTANT]
+> LLM disclosure: This codebase was written with substantial help from large language models: AI coding agents working from the [`AGENTS.md`](AGENTS.md) brief in this repo.
+
 Baegun is a Rust PDF/CBZ to EPUB converter with two frontends that share the same core conversion engine:
 
 - `baegun` CLI (Rust binary)
