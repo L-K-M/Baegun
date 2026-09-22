@@ -20,7 +20,7 @@ jobs:
     name: Frontend (check & build)
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Set up Node
         uses: actions/setup-node@v5
@@ -52,7 +52,7 @@ jobs:
         platform: [ubuntu-22.04, macos-latest]
     runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # Tauri's desktop backend (src-tauri) links against the system webview
       # and GTK, so these are required to compile/clippy/test the workspace.
