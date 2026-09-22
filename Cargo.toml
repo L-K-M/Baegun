@@ -20,7 +20,7 @@ crc32fast = "1.5"
 clap = { version = "4.5", features = ["derive"] }
 jpeg-decoder = { version = "0.3", default-features = false }
 png = "0.17"
-pulldown-cmark = "0.11"
+pulldown-cmark = "0.13"
 quick-xml = { version = "0.38", features = ["encoding"] }
 regex = "1.11"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "multipart", "rustls-tls"] }
